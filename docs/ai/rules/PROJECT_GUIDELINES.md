@@ -18,4 +18,9 @@ This document defines the core development standards for the project to ensure c
   - The OpenApi documentation should be located in an interface where all endpoints of a controller are defined (e.g., `UserController`).
   - The implementation of a controller interface should be located in a package called "impl" located in the same directory of the controller interface (e.g., `UserControllerImpl`).
 
+## 3. Mappers
+  - All mappers between architectural layers (e.g., JPA entity ↔ domain model) MUST be implemented using MapStruct (`@Mapper`).
+  - Do not hand-write mapping logic between layers when MapStruct can generate it.
+  - MapStruct is wired manually in `pom.xml`: `org.mapstruct:mapstruct` as a dependency, and `org.mapstruct:mapstruct-processor` (plus `org.projectlombok:lombok-mapstruct-binding` so MapStruct sees Lombok-generated accessors) in the `annotationProcessorPaths` of BOTH the `default-compile` and `default-testCompile` executions of `maven-compiler-plugin`. Adding another annotation processor means editing both executions.
+
 

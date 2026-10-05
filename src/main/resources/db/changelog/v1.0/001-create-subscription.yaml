@@ -1,0 +1,92 @@
+databaseChangeLog:
+  - changeSet:
+      id: v1.0-001-create-subscription
+      author: notification-service
+      changes:
+        - createSequence:
+            sequenceName: subscription_seq
+            startValue: 1
+            incrementBy: 50
+        - createTable:
+            tableName: subscription
+            columns:
+              - column:
+                  name: id
+                  type: bigint
+                  defaultValueSequenceNext: subscription_seq
+                  constraints:
+                    primaryKey: true
+                    primaryKeyName: pk_subscription
+                    nullable: false
+              - column:
+                  name: subscriber_id
+                  type: varchar(100)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: event_type
+                  type: varchar(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: channel
+                  type: varchar(20)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: status
+                  type: varchar(30)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: endpoint
+                  type: varchar(1000)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version
+                  type: bigint
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+        - addUniqueConstraint:
+            tableName: subscription
+            constraintName: uq_subscription_subscriber_event_type_channel
+            columnNames: subscriber_id, event_type, channel
+        - createIndex:
+            tableName: subscription
+            indexName: idx_subscription_event_type_channel_status
+            columns:
+              - column:
+                  name: event_type
+              - column:
+                  name: channel
+              - column:
+                  name: status
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            sql: "COMMENT ON COLUMN subscription.event_type IS 'Possible values: credit_card_payment, cash_withdrawal, credit_transfer. Must correspond to the EventType Java enum.'"
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            sql: "COMMENT ON COLUMN subscription.channel IS 'Possible values: WEBHOOK. Must correspond to the NotificationChannel Java enum.'"
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            sql: "COMMENT ON COLUMN subscription.status IS 'Possible values: ACTIVE, INACTIVE. Must correspond to the SubscriptionStatus Java enum.'"
+      rollback:
+        - dropTable:
+            tableName: subscription
+        - dropSequence:
+            sequenceName: subscription_seq

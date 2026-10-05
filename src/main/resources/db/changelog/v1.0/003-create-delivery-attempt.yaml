@@ -1,0 +1,91 @@
+databaseChangeLog:
+  - changeSet:
+      id: v1.0-003-create-delivery-attempt
+      author: notification-service
+      changes:
+        - createSequence:
+            sequenceName: delivery_attempt_seq
+            startValue: 1
+            incrementBy: 50
+        - createTable:
+            tableName: delivery_attempt
+            columns:
+              - column:
+                  name: id
+                  type: bigint
+                  defaultValueSequenceNext: delivery_attempt_seq
+                  constraints:
+                    primaryKey: true
+                    primaryKeyName: pk_delivery_attempt
+                    nullable: false
+              - column:
+                  name: notification_event_id
+                  type: bigint
+                  constraints:
+                    nullable: false
+              - column:
+                  name: channel
+                  type: varchar(20)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: status
+                  type: varchar(30)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: attempt_number
+                  type: integer
+                  constraints:
+                    nullable: false
+              - column:
+                  name: error_message
+                  type: text
+                  constraints:
+                    nullable: true
+              - column:
+                  name: created_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: completed_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: true
+              - column:
+                  name: version
+                  type: bigint
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+        - addForeignKeyConstraint:
+            baseTableName: delivery_attempt
+            baseColumnNames: notification_event_id
+            referencedTableName: notification_event
+            referencedColumnNames: id
+            constraintName: fk_delivery_attempt_notification_event
+            onDelete: RESTRICT
+        - addUniqueConstraint:
+            tableName: delivery_attempt
+            constraintName: uq_delivery_attempt_notification_event_attempt_number
+            columnNames: notification_event_id, attempt_number
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            sql: "ALTER TABLE delivery_attempt ADD CONSTRAINT ck_delivery_attempt_attempt_number_positive CHECK (attempt_number > 0)"
+            rollback:
+              sql: "ALTER TABLE delivery_attempt DROP CONSTRAINT ck_delivery_attempt_attempt_number_positive"
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            sql: "COMMENT ON COLUMN delivery_attempt.channel IS 'Possible values: WEBHOOK. Must correspond to the NotificationChannel Java enum.'"
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            sql: "COMMENT ON COLUMN delivery_attempt.status IS 'Possible values: IN_PROGRESS, SUCCESS, FAILED. Must correspond to the DeliveryAttemptStatus Java enum.'"
+      rollback:
+        - dropTable:
+            tableName: delivery_attempt
+        - dropSequence:
+            sequenceName: delivery_attempt_seq

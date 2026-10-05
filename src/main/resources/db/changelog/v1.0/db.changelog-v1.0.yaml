@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - include:
+      file: db/changelog/v1.0/001-create-subscription.yaml
+
+  - include:
+      file: db/changelog/v1.0/002-create-notification-event.yaml
+
+  - include:
+      file: db/changelog/v1.0/003-create-delivery-attempt.yaml

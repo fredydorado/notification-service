@@ -1,0 +1,72 @@
+databaseChangeLog:
+  - changeSet:
+      id: v1.0-002-create-notification-event
+      author: notification-service
+      changes:
+        - createSequence:
+            sequenceName: notification_event_seq
+            startValue: 1
+            incrementBy: 50
+        - createTable:
+            tableName: notification_event
+            columns:
+              - column:
+                  name: id
+                  type: bigint
+                  defaultValueSequenceNext: notification_event_seq
+                  constraints:
+                    primaryKey: true
+                    primaryKeyName: pk_notification_event
+                    nullable: false
+              - column:
+                  name: event_type
+                  type: varchar(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: status
+                  type: varchar(30)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: payload
+                  type: jsonb
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: version
+                  type: bigint
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+        - createIndex:
+            tableName: notification_event
+            indexName: idx_notification_event_status_created_at
+            columns:
+              - column:
+                  name: status
+              - column:
+                  name: created_at
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            sql: "COMMENT ON COLUMN notification_event.event_type IS 'Possible values: credit_card_payment, cash_withdrawal, credit_transfer. Must correspond to the EventType Java enum.'"
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            sql: "COMMENT ON COLUMN notification_event.status IS 'Possible values: PENDING, DELIVERING, RETRY_SCHEDULED, COMPLETED, FAILED. Must correspond to the NotificationEventStatus Java enum.'"
+      rollback:
+        - dropTable:
+            tableName: notification_event
+        - dropSequence:
+            sequenceName: notification_event_seq
