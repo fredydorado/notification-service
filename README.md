@@ -37,73 +37,115 @@ The app expects a reachable PostgreSQL and Kafka; Liquibase owns the schema and
 
 ## Running the tests
 
-The unit tests need nothing special:
+The suite is **80 tests**: unit tests plus integration tests that run against a real
+PostgreSQL (`postgres:latest`) and a real Kafka (`apache/kafka:latest`) started by
+Testcontainers. All of them pass; if they fail on your machine, it is almost always
+because the JVM cannot reach a Docker daemon.
 
-```bash
-mvn test -Dtest='!*IntTest,!NotificationServiceApplicationTests' -DfailIfNoSpecifiedTests=false
-```
+### Linux and macOS
 
-The integration tests (`*IntTest` plus `NotificationServiceApplicationTests`)
-start a real PostgreSQL (`postgres:latest`) and Kafka (`apache/kafka:latest`)
-through Testcontainers, so **`mvn test` needs a reachable Docker daemon**. The
-first run pulls both images and is slow.
+With a native Docker daemon running, nothing special is needed:
 
 ```bash
 mvn test
 ```
 
-### Windows + Docker inside WSL2
+### Windows
 
-If Docker runs as a native daemon inside a WSL2 distro rather than as Docker
-Desktop, the Windows JVM cannot see it by default. Two things are needed.
+It depends on how Docker is installed.
 
-**1. Keep the distro alive for the whole run.** WSL2 stops a distro as soon as
-its last command exits, which takes the daemon down mid-run and surfaces as
-`DOCKER_HOST ... is not listening` or `Connection refused`. In a terminal of its
-own:
+**With Docker Desktop**, `mvn test` works as-is — Testcontainers finds the daemon over
+its named pipe.
 
-```bash
-wsl -d Ubuntu -- bash -c 'sleep 5400'
+**With Docker running inside a WSL2 distro** (the setup on this project's dev machine),
+plain `mvn test` fails *every* integration test with:
+
+```
+Caused by: java.lang.IllegalStateException: Could not find a valid Docker environment.
 ```
 
-**2. Point Testcontainers at the daemon over TCP.** A one-off `socat` bridge
-exposes the daemon's unix socket on port 2375 (`--restart unless-stopped`, so it
-comes back with the distro):
+This is not a problem with the tests. Two things are missing at run time:
 
-```bash
-wsl -d Ubuntu -- docker run -d --name docker-tcp-proxy --restart unless-stopped --network host -v /var/run/docker.sock:/var/run/docker.sock alpine/socat TCP-LISTEN:2375,fork,reuseaddr UNIX-CONNECT:/var/run/docker.sock
+1. **The distro has to stay up.** WSL2 stops an idle distro and takes the daemon with
+   it — including part way through a run, which shows up as an intermittent
+   `Connection refused` or `DOCKER_HOST ... is not listening`.
+2. **The JVM has to be told where the daemon is.** There is no named pipe to discover,
+   so Testcontainers needs `DOCKER_HOST`.
+
+Use the runner script, which handles both and passes everything through to Maven:
+
+```powershell
+.\scripts
+un-tests.ps1
 ```
 
-Find the distro's address with `wsl -d Ubuntu -- hostname -I` and use the **first
-entry**. Use the literal IPv4 address, not `localhost` — the JVM may resolve
-`localhost` to `::1` and report the port as closed.
+```bash
+./scripts/run-tests.sh
+```
+
+Any Maven arguments work as usual:
+
+```powershell
+.\scripts
+un-tests.ps1 test -Dtest=EventProcessingFlowIntTest
+```
+
+```powershell
+.\scripts
+un-tests.ps1 package
+```
+
+The script holds a WSL session open for exactly the length of the run, starts the
+`docker-tcp-proxy` bridge if it is not already up, resolves the distro's current IP,
+exports `DOCKER_HOST`, runs Maven, and then releases the session. Expect output like:
+
+```
+[1/4] Holding Ubuntu open for the duration of the run...
+[2/4] Checking the Docker daemon and the docker-tcp-proxy bridge...
+      Docker Engine 25.0.5
+[3/4] Resolving the Ubuntu address...
+      DOCKER_HOST=tcp://172.18.63.240:2375
+[4/4] mvn test
+```
+
+`scripts/run-tests.sh` is safe to use everywhere: where a daemon is already reachable
+(Linux, macOS, Docker Desktop, or `DOCKER_HOST` already set) it is a thin passthrough
+to Maven.
+
+Point the scripts at a different distro or port with environment variables:
+
+```powershell
+$env:WSL_DISTRO = 'Ubuntu-22.04'; $env:DOCKER_BRIDGE_PORT = '2375'
+```
+
+#### Doing it by hand
+
+If you would rather not use the script, the same thing in two terminals:
+
+```bash
+wsl -d Ubuntu -- bash -c 'sleep infinity'
+```
 
 ```bash
 DOCKER_HOST=tcp://172.18.63.240:2375 mvn test
 ```
 
-The address is assigned by WSL and can change when the distro restarts, so
-re-read it rather than hard-coding it anywhere.
+Take the address from the **first** entry of `wsl -d Ubuntu -- hostname -I`. Use the
+literal IPv4 — the JVM may resolve `localhost` to `::1` and report the port closed.
+WSL assigns the address, so it can change when the distro restarts; re-read it rather
+than hard-coding it. The one-off bridge, if it does not exist yet:
 
-### Why the pom has a `windows-unixdomain-tmpdir` profile
-
-On some Windows setups `java.nio.channels.Selector.open()` fails in *every* JVM
-with `IOException: Unable to establish loopback connection`. The JDK backs the
-selector's wakeup pipe with an AF_UNIX socket created in `%TEMP%`; where security
-software holds that folder, the socket binds but cannot be connected to. That
-breaks anything selector-based — the JDK `HttpServer` webhook stubs in the tests,
-Kafka clients, Testcontainers.
-
-The Windows-only profile in [`pom.xml`](pom.xml) redirects the JDK's AF_UNIX
-scratch directory to `target/`:
-
-```
--Djdk.net.unixdomain.tmpdir=${project.build.directory}
+```bash
+wsl -d Ubuntu -- docker run -d --name docker-tcp-proxy --restart unless-stopped --network host -v /var/run/docker.sock:/var/run/docker.sock alpine/socat TCP-LISTEN:2375,fork,reuseaddr UNIX-CONNECT:/var/run/docker.sock
 ```
 
-Setting `-Djava.io.tmpdir` does **not** help — `UnixDomainSockets` reads the
-`TEMP` environment variable, not that property. Fixing `TMP`/`TEMP` at the OS
-level fixes it machine-wide. Linux and CI runs keep the platform default.
+### Unit tests only
+
+These need no Docker at all, on any platform:
+
+```bash
+mvn test "-Dtest=!*IntTest,!NotificationServiceApplicationTests" -DfailIfNoSpecifiedTests=false
+```
 
 ### Narrowing a run
 
@@ -114,6 +156,26 @@ mvn test -Dtest=EventProcessingFlowIntTest
 ```bash
 mvn test -Dtest=NotificationEventTest#shouldRejectInvalidTransition
 ```
+
+### Why the pom has a `windows-unixdomain-tmpdir` profile
+
+On some Windows setups `java.nio.channels.Selector.open()` fails in *every* JVM with
+`IOException: Unable to establish loopback connection`. The JDK backs the selector's
+wakeup pipe with an AF_UNIX socket created in `%TEMP%`; where security software holds
+that folder, the socket binds but cannot be connected to. That breaks anything
+selector-based — the JDK `HttpServer` webhook stubs in the tests, Kafka clients,
+Testcontainers.
+
+The Windows-only profile in [`pom.xml`](pom.xml) redirects the JDK's AF_UNIX scratch
+directory to `target/`:
+
+```
+-Djdk.net.unixdomain.tmpdir=${project.build.directory}
+```
+
+Setting `-Djava.io.tmpdir` does **not** help — `UnixDomainSockets` reads the `TEMP`
+environment variable, not that property. Fixing `TMP`/`TEMP` at the OS level fixes it
+machine-wide. Linux and CI runs keep the platform default.
 
 ---
 
@@ -191,6 +253,7 @@ All three carry a `version` column for optimistic locking.
 ## Project layout
 
 ```
+scripts/         run-tests.ps1 / run-tests.sh - Maven with a reachable Docker daemon
 src/main/java/com/fardorado/notification/
   domain/        model + state machine; no Spring, JPA, Kafka or Jackson
   application/   use cases, commands, ports (in/out), domain services

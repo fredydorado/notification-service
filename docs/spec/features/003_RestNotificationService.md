@@ -189,21 +189,619 @@ Do not introduce a second OpenAPI library if one is already configured.
 
 ---
 
-# 7. REST Endpoints
+# 7. REST Endpoint Definitions
 
-Implement the REST endpoints defined by the existing notification-service design.
+The coding agent **must implement exactly the following REST endpoints** as part of this challenge:
 
-Before generating code:
+```text
+GET  /notification_events
+GET  /notification_events/{notification_event_id}
+POST /notification_events/{notification_event_id}/replay
+```
 
-1. Inspect the existing project for endpoint definitions or API contracts.
-2. Reuse existing DTOs if they already represent the required API contract.
-3. Do not invent new endpoint paths or HTTP semantics if they are already defined elsewhere in the project.
-4. Preserve existing API versioning conventions.
-5. Follow the project's existing URL naming conventions.
-6. Use appropriate HTTP methods and status codes.
-7. Add OpenAPI documentation to the interface.
+These endpoints are part of the REST/API layer only. The underlying event-processing, delivery, and retry components already exist and must be reused.
 
-The agent must not modify unrelated endpoints.
+---
+
+## 7.1 GET `/notification_events`
+
+### Purpose
+
+Retrieve notification events belonging to the authenticated client.
+
+The endpoint provides a paginated list of notification events and supports filtering by date range and delivery status.
+
+The authenticated principal determines the `client_id`.
+
+### Important security rule
+
+The client must **not** be able to provide an arbitrary `client_id` as a query parameter.
+
+The authenticated principal/security context must determine which client's notification events can be accessed.
+
+The application service must enforce client ownership when retrieving the events.
+
+---
+
+### Query Parameters
+
+The endpoint supports:
+
+| Parameter         | Required | Description                                 |
+| ----------------- | -------- | ------------------------------------------- |
+| `from`            | No       | Start of the event creation date/time range |
+| `to`              | No       | End of the event creation date/time range   |
+| `delivery_status` | No       | Filter by notification/delivery status      |
+| `page`            | No*      | Page number                                 |
+| `size`            | No*      | Number of records per page                  |
+
+`page` and `size` should use the project's existing pagination conventions.
+
+If the project does not define defaults, use reasonable API defaults and enforce a maximum page size through validation/configuration.
+
+Example:
+
+```http
+GET /notification_events?from=2026-10-01T00:00:00Z&to=2026-10-05T23:59:59Z&delivery_status=FAILED&page=0&size=20
+```
+
+Do not expose a `client_id` query parameter.
+
+---
+
+### Validation
+
+Validate:
+
+* `from` has a valid date/time format.
+* `to` has a valid date/time format.
+* `from <= to`.
+* `delivery_status` contains a supported status.
+* `page >= 0`.
+* `size > 0`.
+* `size` does not exceed the configured maximum.
+
+Invalid parameters must result in:
+
+```text
+400 BAD_REQUEST
+```
+
+using the standardized `ErrorResponseDto`.
+
+---
+
+### Response
+
+Successful requests return:
+
+```text
+200 OK
+```
+
+The response must be paginated.
+
+Use the project's existing pagination response convention if one already exists.
+
+The logical response should contain:
+
+```text
+items
+page
+size
+totalElements
+totalPages
+```
+
+Each notification-event summary should expose the information defined by the API contract without exposing JPA/persistence implementation details.
+
+At minimum, the list representation should provide enough information to identify and inspect the notification event, including:
+
+```text
+id
+eventType
+createdAt
+status
+attemptCount
+lastHttpStatus
+```
+
+Do not expose the complete event payload unless the existing API design explicitly requires it.
+
+---
+
+### Example response
+
+```json
+{
+  "items": [
+    {
+      "id": "notification-event-id",
+      "eventType": "ORDER_CREATED",
+      "createdAt": "2026-10-05T15:30:00Z",
+      "status": "FAILED",
+      "attemptCount": 3,
+      "lastHttpStatus": 500
+    }
+  ],
+  "page": 0,
+  "size": 20,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+The exact DTO naming should follow the project's existing naming conventions.
+
+---
+
+### Application-layer interaction
+
+The controller must delegate to an existing application service/use case responsible for querying notification events.
+
+Conceptually:
+
+```text
+HTTP Request
+    |
+    v
+NotificationController
+    |
+    v
+NotificationEventQueryService / Use Case
+    |
+    v
+Existing persistence components
+```
+
+The controller must not access the JPA repository directly.
+
+The query must enforce the authenticated client's ownership.
+
+---
+
+## 7.2 GET `/notification_events/{notification_event_id}`
+
+### Purpose
+
+Retrieve the details of a specific notification event belonging to the authenticated client.
+
+Example:
+
+```http
+GET /notification_events/123e4567-e89b-12d3-a456-426614174000
+```
+
+---
+
+### Path Parameter
+
+| Parameter               | Required | Description                          |
+| ----------------------- | -------- | ------------------------------------ |
+| `notification_event_id` | Yes      | Identifier of the notification event |
+
+Validate the identifier according to its actual type in the existing domain model.
+
+Do not create a second identifier representation merely for the REST layer.
+
+---
+
+### Ownership
+
+The application service must verify that the requested notification event belongs to the authenticated client.
+
+A client must not be able to retrieve another client's notification event by guessing or supplying its identifier.
+
+If the resource does not exist or is not accessible to the authenticated client according to the project's security model, return:
+
+```text
+404 NOT_FOUND
+```
+
+using the standardized error response.
+
+Do not leak information about whether another client's resource exists.
+
+---
+
+### Response
+
+Successful requests return:
+
+```text
+200 OK
+```
+
+The detail response should contain:
+
+```text
+id
+eventType
+createdAt
+status
+attemptCount
+lastHttpStatus
+webhookUrl
+attempts
+```
+
+The `attempts` collection represents the delivery-attempt history.
+
+Each attempt should contain the information required by the API contract, including:
+
+```text
+attempt
+status
+httpStatus
+```
+
+Example:
+
+```json
+{
+  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "eventType": "ORDER_CREATED",
+  "createdAt": "2026-10-05T15:30:00Z",
+  "status": "FAILED",
+  "attemptCount": 3,
+  "lastHttpStatus": 500,
+  "webhookUrl": "https://example.com/webhook",
+  "attempts": [
+    {
+      "attempt": 1,
+      "status": "FAILED",
+      "httpStatus": 500
+    },
+    {
+      "attempt": 2,
+      "status": "FAILED",
+      "httpStatus": 503
+    },
+    {
+      "attempt": 3,
+      "status": "FAILED",
+      "httpStatus": 500
+    }
+  ]
+}
+```
+
+Do not expose JPA entities directly.
+
+Create/use an API response DTO.
+
+---
+
+### Errors
+
+If the notification event does not exist or does not belong to the authenticated client:
+
+```text
+404 NOT_FOUND
+```
+
+If the identifier is syntactically invalid:
+
+```text
+400 BAD_REQUEST
+```
+
+Use the standardized `ErrorResponseDto`.
+
+---
+
+### Application-layer interaction
+
+The controller must delegate the operation to an existing application/query service.
+
+Conceptually:
+
+```text
+HTTP Request
+    |
+    v
+NotificationController
+    |
+    v
+GetNotificationEventUseCase
+    |
+    v
+Existing Domain / Persistence Components
+```
+
+The controller must not:
+
+* Query JPA repositories directly.
+* Build the attempt history itself.
+* Implement authorization/ownership logic directly.
+* Reimplement notification-event processing.
+
+---
+
+## 7.3 POST `/notification_events/{notification_event_id}/replay`
+
+### Purpose
+
+Request replay/reprocessing of a notification event that has definitively failed.
+
+Example:
+
+```http
+POST /notification_events/123e4567-e89b-12d3-a456-426614174000/replay
+```
+
+The replay operation is **asynchronous**.
+
+The REST endpoint only requests the replay. The existing event-processing/retry infrastructure performs the actual processing.
+
+---
+
+### Path Parameter
+
+| Parameter               | Required | Description                                    |
+| ----------------------- | -------- | ---------------------------------------------- |
+| `notification_event_id` | Yes      | Identifier of the notification event to replay |
+
+Validate the identifier according to the existing domain model.
+
+---
+
+### Request Body
+
+No request body is required.
+
+The replay operation is completely identified by:
+
+```text
+notification_event_id
+```
+
+---
+
+### Allowed State
+
+Replay is allowed only for notification events that have **definitively failed**.
+
+The design uses:
+
+```text
+FAILED
+```
+
+as the terminal failure state.
+
+If the existing implementation distinguishes a permanent failure using a value such as:
+
+```text
+FAILED_PERMANENTLY
+```
+
+reuse the existing enum/domain representation rather than creating a new one.
+
+Replay must **not** be allowed for:
+
+```text
+COMPLETED
+```
+
+or events that are currently being processed.
+
+The normal state transition for replay is:
+
+```text
+FAILED
+   |
+   | replay
+   v
+PENDING
+```
+
+The existing event-processing infrastructure then continues processing the event.
+
+Do not implement the actual retry/delivery processing inside the controller.
+
+---
+
+### Replay Semantics
+
+The replay operation must be atomic with respect to the notification-event state.
+
+Conceptually:
+
+```text
+1. Load notification event.
+2. Verify client ownership.
+3. Verify current state is FAILED.
+4. Atomically transition:
+       FAILED -> PENDING
+5. Return 202 Accepted.
+6. Existing event-processing infrastructure processes the event asynchronously.
+```
+
+The implementation must use the existing optimistic-locking/concurrency mechanisms.
+
+Two concurrent replay requests must not cause duplicate replay processing.
+
+For example:
+
+```text
+Request A: FAILED -> PENDING  SUCCESS
+Request B: FAILED -> PENDING  REJECTED
+```
+
+The second request must not independently initiate another replay.
+
+---
+
+### Response
+
+Successful replay request:
+
+```text
+202 ACCEPTED
+```
+
+The response should indicate that replay has been accepted for asynchronous processing.
+
+Recommended response:
+
+```json
+{
+  "notificationEventId": "123e4567-e89b-12d3-a456-426614174000",
+  "status": "PENDING"
+}
+```
+
+If the existing API contract established `RETRY_SCHEDULED` as the externally returned replay status, preserve that contract. Do not introduce a new status solely for the REST layer.
+
+The important semantic requirement is that the replay request is accepted asynchronously and does not wait for webhook delivery to complete.
+
+---
+
+### Replay Errors
+
+#### Notification event does not exist
+
+```text
+404 NOT_FOUND
+```
+
+Return the standardized `ErrorResponseDto`.
+
+---
+
+#### Notification event does not belong to the authenticated client
+
+```text
+404 NOT_FOUND
+```
+
+Do not reveal another client's resource.
+
+---
+
+#### Notification event is not replayable
+
+For example:
+
+```text
+COMPLETED
+DELIVERING
+PENDING
+RETRY_SCHEDULED
+```
+
+Return:
+
+```text
+409 CONFLICT
+```
+
+using the standardized error response.
+
+The error code should indicate that the resource is not in a replayable state, for example:
+
+```text
+NOTIFICATION_EVENT_NOT_REPLAYABLE
+```
+
+---
+
+#### Concurrent replay
+
+If another request has already transitioned the event from `FAILED` to `PENDING`, do not perform the transition again.
+
+Handle the optimistic-lock/conditional-update result according to the project's concurrency conventions.
+
+The endpoint must never create duplicate replay processing.
+
+---
+
+# 7.4 Endpoint Summary
+
+The REST API exposed by the challenge is:
+
+| Method | Endpoint                                              | Purpose                                                 | Success        |
+| ------ | ----------------------------------------------------- | ------------------------------------------------------- | -------------- |
+| `GET`  | `/notification_events`                                | List authenticated client's notification events         | `200 OK`       |
+| `GET`  | `/notification_events/{notification_event_id}`        | Retrieve notification-event details and attempt history | `200 OK`       |
+| `POST` | `/notification_events/{notification_event_id}/replay` | Request asynchronous replay of a failed event           | `202 ACCEPTED` |
+
+Common error responses:
+
+| HTTP Status | Meaning                                                                    |
+| ----------- | -------------------------------------------------------------------------- |
+| `400`       | Invalid request, path parameter, query parameter, or validation error      |
+| `404`       | Notification event not found or not accessible to the authenticated client |
+| `409`       | Resource state does not allow the requested operation                      |
+| `500`       | Unexpected server-side error                                               |
+
+All error responses must use the standardized `ErrorResponseDto`.
+
+---
+
+# 7.5 OpenAPI Requirements for These Endpoints
+
+The controller interface must document all three endpoints.
+
+Each endpoint should document:
+
+### GET `/notification_events`
+
+* Summary.
+* Description.
+* Query parameters.
+* Successful `200` response.
+* `400` validation response.
+* `500` response where applicable.
+* Response schema.
+
+### GET `/notification_events/{notification_event_id}`
+
+* Summary.
+* Description.
+* `notification_event_id` path parameter.
+* Successful `200` response.
+* `400` validation response.
+* `404` response.
+* `500` response where applicable.
+* Response schema.
+
+### POST `/notification_events/{notification_event_id}/replay`
+
+* Summary.
+* Description.
+* `notification_event_id` path parameter.
+* Successful `202` response.
+* `400` validation response.
+* `404` response.
+* `409` non-replayable-state response.
+* `500` response where applicable.
+* Response schema.
+
+All OpenAPI annotations must be placed on the **controller interface**, never duplicated on the controller implementation.
+
+---
+
+# 7.6 Implementation Constraints
+
+The REST implementation must respect the following rules:
+
+1. Do not implement Kafka/event consumption in the controllers.
+2. Do not implement retry logic in the controllers.
+3. Do not execute webhook calls from the controllers.
+4. Do not access JPA repositories directly from the controllers.
+5. Do not create a new persistence model.
+6. Reuse the existing `NotificationEvent`, `DeliveryAttempt`, subscription, status, and channel domain concepts.
+7. Reuse existing application services/use cases whenever available.
+8. Reuse the existing optimistic-locking mechanism.
+9. Enforce authenticated-client ownership.
+10. Keep replay asynchronous.
+11. Do not wait for notification delivery before returning `202 Accepted`.
+12. Do not introduce a `deliveries` table/entity.
+13. Validate all externally supplied parameters.
+14. Return standardized `ErrorResponseDto` errors.
+15. Keep OpenAPI documentation on the controller interface only.
 
 ---
 
