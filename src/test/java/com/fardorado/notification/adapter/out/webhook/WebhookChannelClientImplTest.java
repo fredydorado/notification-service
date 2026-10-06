@@ -9,7 +9,8 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+
 import com.fardorado.notification.application.port.out.WebhookDeliveryCommand;
 import com.fardorado.notification.application.port.out.WebhookDeliveryResult;
 import com.fardorado.notification.domain.model.notification.EventType;
@@ -28,7 +29,7 @@ class WebhookChannelClientImplTest {
     private static final StringBuilder LAST_RECEIVED_BODY = new StringBuilder();
 
     private final WebhookChannelClientImpl client =
-            new WebhookChannelClientImpl(new ObjectMapper());
+            new WebhookChannelClientImpl(JsonMapper.builder().build());
 
     @BeforeAll
     static void startServer() throws IOException {

@@ -9,7 +9,9 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.json.JsonMapper;
+
 import com.fardorado.notification.application.port.out.NotificationChannelClient;
 import com.fardorado.notification.application.port.out.WebhookDeliveryCommand;
 import com.fardorado.notification.application.port.out.WebhookDeliveryResult;
@@ -30,10 +32,10 @@ public class WebhookChannelClientImpl implements NotificationChannelClient {
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(10);
 
     private final RestClient restClient;
-    private final ObjectMapper objectMapper;
+    private final JsonMapper jsonMapper;
 
-    public WebhookChannelClientImpl(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
+    public WebhookChannelClientImpl(JsonMapper jsonMapper) {
+        this.jsonMapper = jsonMapper;
         org.springframework.http.client.SimpleClientHttpRequestFactory requestFactory =
                 new org.springframework.http.client.SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(CONNECT_TIMEOUT);
@@ -83,16 +85,16 @@ public class WebhookChannelClientImpl implements NotificationChannelClient {
 
     private String buildRequestBody(WebhookDeliveryCommand command) {
         try {
-            var root = objectMapper.createObjectNode();
+            var root = jsonMapper.createObjectNode();
             root.put("event_id", command.eventId());
             root.put("event_type", command.eventType().name().toLowerCase(Locale.ROOT));
             root.put("event_version", command.eventVersion());
             if (command.correlationId() != null) {
                 root.put("correlation_id", command.correlationId());
             }
-            root.set("content", objectMapper.readTree(command.content()));
+            root.set("content", jsonMapper.readTree(command.content()));
             return root.toString();
-        } catch (com.fasterxml.jackson.core.JacksonException e) {
+        } catch (JacksonException e) {
             throw new IllegalStateException("cannot serialize webhook request body", e);
         }
     }

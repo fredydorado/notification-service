@@ -9,14 +9,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.kafka.support.Acknowledgment;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+
 import com.fardorado.notification.application.command.ProcessNotificationEventCommand;
 import com.fardorado.notification.application.port.in.ProcessNotificationEventUseCase;
 import com.fardorado.notification.domain.model.notification.EventType;
 
 class KafkaNotificationConsumerTest {
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final JsonMapper jsonMapper = JsonMapper.builder().build();
     private final List<ProcessNotificationEventCommand> receivedCommands = new ArrayList<>();
     private final AtomicInteger acknowledgments = new AtomicInteger();
 
@@ -29,7 +30,7 @@ class KafkaNotificationConsumerTest {
         }
     };
 
-    private final KafkaNotificationConsumer consumer = new KafkaNotificationConsumer(useCase, objectMapper);
+    private final KafkaNotificationConsumer consumer = new KafkaNotificationConsumer(useCase, jsonMapper);
 
     @Test
     void shouldDelegateValidEventAndAcknowledge() {

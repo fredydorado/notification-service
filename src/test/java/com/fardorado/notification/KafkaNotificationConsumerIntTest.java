@@ -3,6 +3,7 @@ package com.fardorado.notification;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -18,8 +19,8 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import com.fardorado.notification.application.port.out.SubscriptionRepository;
 import com.fardorado.notification.domain.model.notification.EventType;
 import com.fardorado.notification.domain.model.subscription.Subscription;
@@ -183,14 +184,15 @@ class KafkaNotificationConsumerIntTest {
     @TestConfiguration(proxyBeanMethods = false)
     static class SampleEventsConfiguration {
 
-        private final ObjectMapper objectMapper = new ObjectMapper();
+        private final JsonMapper jsonMapper = JsonMapper.builder().build();
 
         List<JsonNode> sampleEvents() {
             try {
-                JsonNode root = objectMapper.readTree(
+                JsonNode root = jsonMapper.readTree(
                         getClass().getResourceAsStream("/sample/notification_events.json"));
-                return objectMapper.convertValue(root.get("events"),
-                        objectMapper.getTypeFactory().constructCollectionType(List.class, JsonNode.class));
+                List<JsonNode> events = new ArrayList<>();
+                root.get("events").forEach(events::add);
+                return events;
             } catch (Exception e) {
                 throw new IllegalStateException("cannot load sample events", e);
             }

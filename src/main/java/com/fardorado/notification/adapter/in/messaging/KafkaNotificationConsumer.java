@@ -9,9 +9,10 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
-import com.fasterxml.jackson.core.JacksonException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
 import com.fardorado.notification.application.command.ProcessNotificationEventCommand;
 import com.fardorado.notification.application.port.in.ProcessNotificationEventUseCase;
 import com.fardorado.notification.domain.model.notification.EventType;
@@ -39,20 +40,20 @@ public class KafkaNotificationConsumer {
     private static final Logger log = LoggerFactory.getLogger(KafkaNotificationConsumer.class);
 
     private final ProcessNotificationEventUseCase processNotificationEventUseCase;
-    private final ObjectMapper objectMapper;
+    private final JsonMapper jsonMapper;
 
     public KafkaNotificationConsumer(
             ProcessNotificationEventUseCase processNotificationEventUseCase,
-            ObjectMapper objectMapper) {
+            JsonMapper jsonMapper) {
         this.processNotificationEventUseCase = processNotificationEventUseCase;
-        this.objectMapper = objectMapper;
+        this.jsonMapper = jsonMapper;
     }
 
     @KafkaListener(topics = "${notification.kafka.topic:notification-events}")
     public void consume(String message, Acknowledgment acknowledgment) {
         NotificationEventKafkaMessage eventMessage;
         try {
-            eventMessage = objectMapper.readValue(message, NotificationEventKafkaMessage.class);
+            eventMessage = jsonMapper.readValue(message, NotificationEventKafkaMessage.class);
             validate(eventMessage);
         } catch (JacksonException | IllegalArgumentException e) {
             log.error("event rejected, invalid message, acknowledging poison message", e);
@@ -115,10 +116,10 @@ public class KafkaNotificationConsumer {
      */
     private String normalizePayload(String content) {
         try {
-            JsonNode parsed = objectMapper.readTree(content);
+            JsonNode parsed = jsonMapper.readTree(content);
             return parsed.toString();
         } catch (JacksonException e) {
-            return objectMapper.createObjectNode().put("content", content).toString();
+            return jsonMapper.createObjectNode().put("content", content).toString();
         }
     }
 }

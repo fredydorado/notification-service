@@ -22,7 +22,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import com.sun.net.httpserver.HttpServer;
 import com.fardorado.notification.application.port.out.DeliveryAttemptRepository;
 import com.fardorado.notification.application.port.out.NotificationEventRepository;
@@ -192,7 +192,10 @@ class EventProcessingFlowIntTest {
                 .getFirst();
         NotificationEvent stale = NotificationEvent.newEvent(
                 "EVT-FLOW-STALE", EventType.CREDIT_CARD_PAYMENT, 1, null,
-                "stale payment content", subscription.getId());
+                // The payload column is JSONB: plain-text content reaches the
+                // database already wrapped by the consumer, so the simulated
+                // crashed event must be seeded the same way.
+                "{\"content\": \"stale payment content\"}", subscription.getId());
         stale.markDelivering();
         stale = notificationEventRepository.save(stale);
         DeliveryAttempt inProgress = deliveryAttemptRepository.save(
@@ -223,7 +226,7 @@ class EventProcessingFlowIntTest {
     }
 
     private void publish(String eventId, String clientId, String content) {
-        String message = new ObjectMapper().createObjectNode()
+        String message = JsonMapper.builder().build().createObjectNode()
                 .put("event_id", eventId)
                 .put("event_type", "credit_card_payment")
                 .put("event_version", 1)
@@ -235,11 +238,14 @@ class EventProcessingFlowIntTest {
     }
 
     private void awaitEventStatus(String eventId, String status) {
-        await().atMost(30, TimeUnit.SECONDS).untilAsserted(() -> {
-            String currentStatus = jdbcTemplate.queryForObject(
-                    "SELECT status FROM notification_event WHERE event_id = ?", String.class, eventId);
-            assertThat(currentStatus).isEqualTo(status);
-        });
+        // The row does not exist until Kafka ingestion has committed, so the
+        // lookup must produce a retryable assertion failure rather than an
+        // EmptyResultDataAccessException that would abort the await.
+        await().atMost(60, TimeUnit.SECONDS).untilAsserted(() ->
+                assertThat(jdbcTemplate.queryForList(
+                        "SELECT status FROM notification_event WHERE event_id = ?",
+                        String.class, eventId))
+                        .containsExactly(status));
     }
 
     private List<Map<String, Object>> attemptsOf(String eventId) {
