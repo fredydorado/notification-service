@@ -1,15 +1,14 @@
 # Feature 002 — Event Processing Components: Implementation Plan & Handover
 
-> **Purpose of this file:** the 002 feature implementation is code-complete on the original
-> Windows machine, but its integration tests could never be executed there because Docker
-> runs inside WSL and Testcontainers cannot reach it reliably (details in §7). The work now
-> moves to a **Linux machine with native Docker**, where `mvn test` should finally run the
-> whole suite. This document gives a new opencode/agent session (or a human) complete
-> context: what was built, what is verified, what is **not yet verified**, and the exact plan
-> to finish.
+> **Status: complete.** The 002 feature is implemented and the **full `mvn test` suite
+> passes (80 tests, 0 failures)** - including every integration test - on the original
+> Windows machine. The earlier assumption that the work had to move to a Linux box was
+> wrong: the blockers were two environment faults and two code defects, all of which are
+> now fixed and documented in section 6.
 >
-> **How to use:** point the agent at this file plus `AGENTS.md` and the rule docs under
-> `docs/ai/rules/*.md`. Everything the implementation needs is described below.
+> This file is kept as the record of what was built and what was actually wrong.
+> For day-to-day build/run/test instructions see `README.md`; for agent-facing
+> conventions see `AGENTS.md` and `docs/ai/rules/*.md`.
 
 ---
 
@@ -32,12 +31,12 @@
 - **`mvn test` requires a working Docker daemon** (Testcontainers PostgreSQL `postgres:latest`
   + Kafka `apache/kafka:latest`, declared in `src/test/java/com/fardorado/notification/TestcontainersConfiguration.java`).
 
-**All changes for feature 002 are currently in the working tree, uncommitted.** To move to the
-Linux machine: commit + push (or copy) the whole repo including untracked files.
+**All changes for feature 002 are committed.** `mvn test` additionally needs `DOCKER_HOST`
+where Docker lives inside WSL2 rather than Docker Desktop - see section 6.3 and `README.md`.
 
 ---
 
-## 2. What was implemented (code-complete, compiles, 50 unit tests green)
+## 2. What was implemented
 
 ### Phase 0 — Schema corrections (edited the v1.0 Liquibase changesets in place — they had never been executed against any DB)
 
@@ -129,7 +128,8 @@ application with in-memory fakes (`ProcessNotificationEventUseCaseImplTest`, `De
 (`KafkaNotificationConsumerTest` — envelope mapping/validation/poison; `WebhookChannelClientImplTest` —
 real HTTP against a local JDK `HttpServer` stub, classification incl. 429/404/500/connection failure).
 
-**Integration tests — written and compiling, but NEVER executed against a real Docker daemon:**
+**Integration tests — all passing against real PostgreSQL and Kafka via Testcontainers
+(two of them needed fixes first, see section 6):**
 - `SubscriptionPersistenceIntTest`, `NotificationEventPersistenceIntTest`, `DeliveryAttemptPersistenceIntTest`
   (updated to the new model; cover claim semantics incl. SKIP LOCKED double-claim and stale-claim).
 - `KafkaNotificationConsumerIntTest` — publishes the **verbatim sample events** to a real Kafka topic,
@@ -145,102 +145,38 @@ real HTTP against a local JDK `HttpServer` stub, classification incl. 429/404/50
 
 ---
 
-## 3. The plan to execute on the Linux machine
+## 3. Final test results
 
-**Goal:** run the full `mvn test` suite against native Docker, fix whatever the integration
-tests reveal (they have never run for real), and drive the feature to the 002 spec's
-Definition of Done.
+Run on Windows with Docker reachable inside WSL2 (see section 6 and `README.md`):
 
-### Step 0 — Prerequisites
-1. Java 21 + Maven 3.9+ on PATH; native Docker daemon running (`docker info` works as the user
-   who runs Maven).
-2. Pre-pull to avoid slow first runs: `docker pull postgres:latest` and `docker pull apache/kafka:latest`
-   (the user already pulled the Kafka image on the old machine; on Linux pull again locally).
-3. Sanity: `mvn -q compile && mvn -q test-compile` (must be clean — it was on Windows).
+```
+DOCKER_HOST=tcp://<wsl-ip>:2375 mvn test
+```
 
-### Step 1 — Unit tests only (should already be green)
 ```
-mvn test "-Dtest=!NotificationServiceApplicationTests,!*IntTest"
+Tests run: 80, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
 ```
-Expected: 50 tests, 0 failures. If this fails, something environmental (JDK version) — fix first.
 
-### Step 2 — Persistence integration tests (schema validation happens here)
-```
-mvn test "-Dtest=SubscriptionPersistenceIntTest,NotificationEventPersistenceIntTest,DeliveryAttemptPersistenceIntTest"
-```
-These exercise Liquibase migration + `ddl-auto=validate` + claim queries for real. **Likely failure
-sources, in order of probability:**
-- **Entity↔schema mismatches** under `ddl-auto=validate` (e.g. `webhook_url text`, `event_version`
-  default, `payload jsonb`, `next_attempt_at`). Fix by aligning `*Entity.java` column definitions with
-  the changelogs — **never** edit an executed changeset without recreating the DB volume (tests
-  always start fresh containers, so editing is safe here only while no environment has run them).
-- **JPQL claim query** (`findClaimableEvents`) syntax/semantics against real PostgreSQL: enum
-  params, `Instant` comparisons, `updatedAt` handling. If Hibernate 6 chokes on the three-status
-  `or` predicate, restructure to three separate queries or a native query — keep
-  `FOR UPDATE SKIP LOCKED` (`jakarta.persistence.lock.timeout=-2`) and the single-transaction
-  claim contract.
-- Optimistic-locking/`Thread.sleep(50)` ordering flakiness in `NotificationEventPersistenceIntTest`
-  (sleep-based `created_at` ordering) — if flaky, increase the sleep or order by `id`.
+| Test class | Tests | Covers |
+|---|---|---|
+| `NotificationEventTest`, `DeliveryAttemptTest`, `SubscriptionTest` | 20 | state machine, invalid transitions |
+| `RetryPolicyTest` | 4 | retryability, exhaustion, backoff |
+| `ProcessNotificationEventUseCaseImplTest`, `DeliveryClaimServiceTest`, `ProcessDeliveryUseCaseImplTest` | 17 | idempotency, claiming, delivery orchestration |
+| `KafkaNotificationConsumerTest`, `WebhookChannelClientImplTest` | 9 | envelope mapping, poison messages, HTTP classification |
+| `SubscriptionPersistenceIntTest`, `NotificationEventPersistenceIntTest`, `DeliveryAttemptPersistenceIntTest` | 21 | Liquibase + `ddl-auto=validate`, `SKIP LOCKED` claiming, optimistic locking |
+| `KafkaNotificationConsumerIntTest` | 3 | verbatim sample events, duplicate redelivery, poison messages |
+| `EventProcessingFlowIntTest` | 5 | success, transient retry, exhausted retries, permanent 4xx, stale `DELIVERING` recovery |
+| `NotificationServiceApplicationTests` | 1 | context loads with defaults |
 
-### Step 3 — Kafka ingestion integration test
-```
-mvn test "-Dtest=KafkaNotificationConsumerIntTest"
-```
-**Likely failure sources:**
-- **First-run slowness / await timeouts (30s)**: Kafka container start + topic auto-creation +
-  consumer group assignment can exceed awaits on a cold machine. Increase `await()` timeouts to 60s.
-- **Topic auto-creation**: publishing uses `KafkaTemplate.send(topicName, ...)`. If the
-  `apache/kafka:latest` broker has `auto.create.topics.enable=false`, sends hang/timeout. Fix by
-  creating the topic up front in the test (`KafkaAdmin`/`NewTopic` bean or AdminClient) or pulling
-  the creation into `@BeforeAll`.
-- **`@BeforeAll static` with `@Autowired` parameters** (used in this test for seeding): if the
-  JUnit/Spring combination rejects it, switch the class to
-  `@TestInstance(Lifecycle.PER_CLASS)` + non-static `@BeforeAll`, or seed in `@BeforeEach` (idempotent
-  seeding is already implemented via the `findByClientIdAndEventTypeAndStatus` guard).
-- **`await().during(3, SECONDS).atMost(30, SECONDS)`** (duplicate-redelivery test): the `during`
-  assertion must stay true for 3s; if it proves flaky, replace with: re-publish, wait fixed 3s,
-  assert row count still equals sample size.
-- Consumer group stuck offsets between contexts: each test class uses a **unique topic** already
-  (`notification-events-ingestion-test` / `-flow-test`); if the shared consumer group commits
-  offsets oddly across cached contexts, also set a unique `spring.kafka.consumer.group-id` per class.
+`mvn package` builds the jar with the same suite green.
 
-### Step 4 — End-to-end flow test
-```
-mvn test "-Dtest=EventProcessingFlowIntTest"
-```
-**Likely failure sources:**
-- Timing: dispatcher poll 200ms + backoff 100ms should complete each scenario in seconds; if the
-  box is slow, bump the class-level test properties (poll-interval/backoff) and the 30s awaits.
-- **`shouldRecoverStaleDeliveringEvent`**: the test backdates `updated_at` while the dispatcher may
-  already have claimed the just-created DELIVERING event — the claim happens in a tx with SKIP LOCKED;
-  if a race makes it flaky, create the stale event with `updated_at` already backdated in the same
-  JDBC statement (single UPDATE ... SET status='DELIVERING', updated_at=now()-interval '1 hour').
-- The stub `HttpServer` binds `127.0.0.1` — fine on Linux.
-- `LAST_BODIES` assertions on `/success`: two tests use `/success` (success test + stale recovery);
-  tests run sequentially so the assertion after `awaitEventStatus` is safe, but if the dispatcher
-  is still processing a *previous* test's events (claim batch crosses tests), make the body
-  assertion content-specific (assert the specific `event_id` — already done) rather than order-dependent.
-
-### Step 5 — Full suite
-```
-mvn test
-```
-Includes `NotificationServiceApplicationTests#contextLoads` (default properties: dispatcher
-enabled, real Kafka/PG via `@ServiceConnection`) — if it fails, check Kafka listener container
-startup (manual ack config) and the `@ConditionalOnProperty` scheduler wiring.
-
-### Step 6 — Map results to the 002 spec "Definition of Done" (§29 of the spec)
-Go through the checklist at the end of `docs/spec/features/002_EventProcessingComponents.md`
-item by item and note any unmet item. All architectural requirements were implemented on purpose
-(event_id identity, ack-after-persistence, durable idempotency, state machine, append-only attempts,
-no `deliveries` table, webhook behind `NotificationChannelClient`, `RetryPolicy` isolated,
-DB-backed retries, SKIP LOCKED claiming, bounded worker pool, stale DELIVERING recovery,
-optimistic locking respected, no tx around HTTP).
-
-### Step 7 — Wrap-up
-- Run `mvn -q package` to confirm a full build.
-- Commit with a message in the repo's style (the 001 work was committed previously — check
-  `git log --oneline -10` for the pattern). Do not commit secrets (there are none).
+Everything in the 002 spec's Definition of Done (section 29) is implemented and
+exercised by the tests above: `event_id` identity, ack-after-persistence, durable
+idempotency, the state machine, append-only delivery attempts, no `deliveries` table,
+webhook behind `NotificationChannelClient`, an isolated `RetryPolicy`, database-backed
+retries, `FOR UPDATE SKIP LOCKED` claiming, a bounded worker pool, stale `DELIVERING`
+recovery, optimistic locking, and no transaction around the HTTP call.
 
 ---
 
@@ -307,37 +243,98 @@ entities/repositories/ports, the domain model, the three pre-existing persistenc
 
 ---
 
-## 6. Current failure signature on the old Windows machine (for contrast)
+## 6. What was actually broken (and the fixes)
 
-Every `*IntTest` + `NotificationServiceApplicationTests` failed there with:
+The suite failed for four independent reasons - two environment faults and two code
+defects. None of them required moving to Linux.
+
+### 6.1 Jackson 2 vs Jackson 3 (code defect)
+
+Every integration test failed the Spring context with:
 
 ```
-java.lang.IllegalStateException: Could not find a valid Docker environment.
+No qualifying bean of type 'com.fasterxml.jackson.databind.ObjectMapper'
 ```
 
-That is **purely environmental** (Docker daemon lives inside a WSL2 distro; the Windows-side JVM
-cannot reach it — see §7). It is not a code defect and must not reproduce on Linux with native
-Docker. If any Docker-environment-style error appears on Linux, check `docker info` and group
-membership (`usermod -aG docker <user>`, re-login) before touching code.
+Spring Boot 4.1 ships **Jackson 3** (`tools.jackson`, 3.1.5) and auto-configures a
+`JsonMapper` bean. Jackson 2 is on the classpath only transitively, so
+`KafkaNotificationConsumer` and `WebhookChannelClientImpl` compiled against
+`com.fasterxml.jackson.databind.ObjectMapper` but nothing could inject it.
+
+**Fix:** migrated both classes plus `NotificationEventKafkaMessage` and the four
+affected tests to `tools.jackson`, injecting `tools.jackson.databind.json.JsonMapper`.
+Annotations stay in `com.fasterxml.jackson.annotation`, which Jackson 3 still uses.
+
+### 6.2 `Selector.open()` fails machine-wide (environment)
+
+`java.nio.channels.Selector.open()` failed in **every** JVM on the machine with
+`IOException: Unable to establish loopback connection` /
+`SocketException: Invalid argument: connect`. The JDK backs the selector's wakeup
+pipe with an AF_UNIX socket created in `%TEMP%`; in that folder the socket binds but
+cannot be connected to, nor even deleted ("The file cannot be accessed by the
+system"). Almost certainly endpoint-security filter-driver interference. It is
+**not** the 8.3 short name - the long form `C:\Users\<user>\AppData\Local\Temp`
+fails identically, while `C:\Temp`, `C:\Windows\Temp` and a project `target/` all work.
+
+This breaks anything selector-based: the JDK `HttpServer` webhook stubs, Kafka
+clients, Netty, Testcontainers.
+
+**Fix:** a Windows-only profile in `pom.xml` sets
+`-Djdk.net.unixdomain.tmpdir=${project.build.directory}` for surefire.
+`-Djava.io.tmpdir` is **not** an equivalent - `UnixDomainSockets` reads the `TEMP`
+environment variable, not that property. Fixing `TMP`/`TEMP` at the OS level would
+fix it machine-wide.
+
+### 6.3 Docker unreachable from the Windows JVM (environment)
+
+Docker 25.0.5 does run on this machine, as a native daemon inside the WSL2 `Ubuntu`
+distro, with an `alpine/socat` bridge (`docker-tcp-proxy`, `--network host`,
+`--restart unless-stopped`) exposing it on TCP 2375.
+
+The real problem was not the bridge: **WSL2 stops a distro as soon as its last
+command exits**, taking the daemon down between - and during - commands. That
+produced the intermittent `Connection refused`, `Connection timed out` and
+`DOCKER_HOST ... is not listening` symptoms, and is the likely explanation for the
+`NoHttpResponseException` on streaming calls recorded in earlier notes: short calls
+finished before the shutdown, long-lived ones did not.
+
+**Fix:** hold a session open for the whole run and point Testcontainers at the bridge:
+
+```bash
+wsl -d Ubuntu -- bash -c 'sleep 5400'
+```
+
+```bash
+DOCKER_HOST=tcp://<wsl-ip>:2375 mvn test
+```
+
+Take `<wsl-ip>` from the first address of `wsl -d Ubuntu -- hostname -I`, as a literal
+IPv4 rather than `localhost` - the JVM may resolve `localhost` to `::1` and report the
+port closed. The address is assigned by WSL and changes when the distro restarts, so
+re-read it rather than hard-coding it.
+
+### 6.4 Two defects in `EventProcessingFlowIntTest` (test harness)
+
+- **`shouldRecoverStaleDeliveringEvent`** seeded the simulated crashed event with raw
+  text as the payload, but the column is `jsonb` -> `invalid input syntax for type json`.
+  The production consumer wraps plain text as `{"content": "..."}`; the test now seeds
+  it the same way.
+- **`shouldFailPermanentlyWhenRetriesAreExhausted`** used `JdbcTemplate.queryForObject`,
+  which throws `EmptyResultDataAccessException` rather than an `AssertionError` when the
+  row does not exist yet. Awaitility's `untilAsserted` only retries on `AssertionError`,
+  so the wait aborted on the first poll - before Kafka had delivered the event. The
+  application logs show the event then went through two attempts and ended `FAILED`,
+  exactly as specified. Switched to `queryForList` so a missing row is a retryable
+  assertion, and raised the timeout to 60s to absorb consumer-group assignment on the
+  first test of the class.
 
 ---
 
-## 7. Appendix — Windows/WSL findings (only relevant if anyone returns to that machine)
+## 7. Appendix - superseded notes
 
-Docker runs as a native daemon inside the `Ubuntu` WSL2 distro (unix socket only). Findings:
-
-- WSL2 auto-stops the distro when idle → the daemon and any proxy disappear between commands;
-  keep a `wsl -d Ubuntu -- bash -c 'sleep infinity'` session alive for the whole `mvn test` run.
-- A TCP bridge was installed in WSL for the Windows-side JVM:
-  `docker run -d --name docker-tcp-proxy --restart unless-stopped --network host \
-     -v /var/run/docker.sock:/var/run/docker.sock alpine/socat \
-     TCP-LISTEN:2375,fork,reuseaddr UNIX-CONNECT:/var/run/docker.sock`
-  then `DOCKER_HOST=tcp://<wsl-eth0-ip>:2375` (resolve via `wsl -d Ubuntu -- hostname -I`).
-- With that bridge: short requests worked, `Testcontainers` connected (`Connected to docker`),
-  but **streaming/keep-alive requests via docker-java (Apache HC5) failed with
-  `NoHttpResponseException`** on the Windows→WSL path, while the same requests from inside WSL and
-  from a plain JDK HttpClient on Windows worked. Root cause not fully isolated (suspect: pooled
-  keep-alive connections being closed across the Windows↔WSL boundary). Moving to native Docker
-  on Linux sidesteps all of it.
-- Use `tcp://<ip>:2375` (explicit IPv4), not `tcp://localhost:2375`: the JVM may resolve
-  `localhost` to IPv6 `::1` and report "not listening".
+Earlier revisions of this document concluded that the Windows/WSL path was a dead end
+and that the work had to move to a Linux machine with native Docker. That conclusion
+was wrong; section 6.3 explains what was really happening. The TCP bridge described in
+those notes was sound - it just needed the distro kept alive, and the
+`NoHttpResponseException` findings attributed to the Windows/WSL boundary are best
+explained by the same cause.
