@@ -17,6 +17,21 @@ spring:
     listener:
       ack-mode: manual_immediate
 
+management:
+  endpoints:
+    web:
+      exposure:
+        # Deliberately a curated list and not "*": there is no Spring Security in
+        # this service, so every exposed endpoint is reachable without credentials.
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      # Tags every meter, so several instances stay apart in a single scrape.
+      application: ${spring.application.name}
+
 logging:
   # Surfaces the correlation id the REST filter and the Kafka consumer put in
   # the MDC; without this the default pattern silently drops it.

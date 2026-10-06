@@ -35,7 +35,9 @@ The project was also **designed and developed primarily using AI coding agents**
   `NAMING_CONVENTIONS.md` and `PROJECT_GUIDELINES.md` — which are enforced
   conventions, not suggestions.
 
-Finally, as a comment, one of the requirements was to use the src/test/resources/sample/notification_events.json to test the solution. 
+Finally, there are some important considerations:
+- There is docs/owasp/OWASP_TOP_10_ANALYSIS.md file with a basic analysis of vulnerabilities of the current service.
+- There are some one of the requirements was to use the src/test/resources/sample/notification_events.json to test the solution. 
 So this file was used to test this specific scenario in KafkaNotificationConsumerIntTest. 
 
 ---
@@ -233,6 +235,54 @@ All values live in [`src/main/resources/application.yaml`](src/main/resources/ap
 Kafka consumption uses manual acknowledgement (`ack-mode: manual_immediate`,
 `enable-auto-commit: false`): a message is acknowledged **only after** the
 notification event has been durably persisted.
+
+---
+
+## Observability
+
+Actuator is on the classpath (`spring-boot-starter-actuator`), with
+`micrometer-registry-prometheus` as a **runtime-only** dependency. Four endpoints are
+exposed, configured under `management:` in
+[`application.yaml`](src/main/resources/application.yaml):
+
+| Endpoint | What it gives you |
+|---|---|
+| <http://localhost:8080/actuator/health> | Status with component detail — `db` (a real probe against PostgreSQL), `diskSpace`, `ping`, `ssl` |
+| <http://localhost:8080/actuator/info> | Application name and version, from `META-INF/build-info.properties` |
+| <http://localhost:8080/actuator/metrics> | Meter names as JSON; append one (`/actuator/metrics/jvm.memory.used`) to drill in |
+| <http://localhost:8080/actuator/prometheus> | Every meter in Prometheus text format |
+
+Nothing external has to be running for any of this. `micrometer-registry-prometheus` is
+a client library that renders the in-process registry as text; it does not talk to a
+Prometheus server, and none has to exist:
+
+```bash
+curl -s http://localhost:8080/actuator/prometheus | head -40
+```
+
+There is no custom instrumentation yet — the meters come from the auto-configured
+Micrometer binders, which on this classpath cover:
+
+| Meters | Useful for |
+|---|---|
+| `http_server_requests_*` | REST latency and status mix, per endpoint |
+| `hikaricp_connections_*` | Connection-pool pressure from the dispatcher's worker pool |
+| `kafka_consumer_*` | Ingestion lag and fetch behaviour on `notification-events` |
+| `jvm_*`, `system_*`, `process_*` | Heap, GC pauses, threads, CPU |
+| `tomcat_*` | Servlet container threads and sessions |
+
+Every meter carries an `application` tag (`notification-service`), so several instances
+stay apart in a single scrape.
+
+### A deliberate note on exposure
+
+`management.endpoints.web.exposure.include` is a **curated list**, not `*`. This service
+has no Spring Security (see [Client identity](#client-identity)), so every exposed
+endpoint is reachable without credentials — and `management.endpoint.health.show-details`
+is `always`, so the health body names its components. Both are fine for local work and
+for a deployment where `/actuator/**` is not routed from outside. Before exposing the
+service publicly, put the endpoints behind the ingress or move them to a separate
+`management.server.port`.
 
 ---
 
