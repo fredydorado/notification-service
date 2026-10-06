@@ -37,7 +37,7 @@ The app expects a reachable PostgreSQL and Kafka; Liquibase owns the schema and
 
 ## Running the tests
 
-The suite is **80 tests**: unit tests plus integration tests that run against a real
+The suite is **123 tests**: unit tests plus integration tests that run against a real
 PostgreSQL (`postgres:latest`) and a real Kafka (`apache/kafka:latest`) started by
 Testcontainers. All of them pass; if they fail on your machine, it is almost always
 because the JVM cannot reach a Docker daemon.
@@ -185,6 +185,8 @@ All values live in [`src/main/resources/application.yaml`](src/main/resources/ap
 
 | Property | Default | Meaning |
 |---|---|---|
+| `notification.api.default-page-size` | `20` | Page size when a request does not specify one |
+| `notification.api.max-page-size` | `100` | Largest page a client may request (larger is rejected with 400) |
 | `notification.kafka.topic` | `notification-events` | Topic the consumer subscribes to |
 | `notification.processing.dispatch-enabled` | `true` | Set `false` to disable the retry/delivery scheduler (used by tests that assert on `PENDING` rows) |
 | `notification.processing.poll-interval` | `5s` | How often the dispatcher sweeps for deliverable work |
@@ -198,6 +200,85 @@ All values live in [`src/main/resources/application.yaml`](src/main/resources/ap
 Kafka consumption uses manual acknowledgement (`ack-mode: manual_immediate`,
 `enable-auto-commit: false`): a message is acknowledged **only after** the
 notification event has been durably persisted.
+
+---
+
+## REST API
+
+Three endpoints, documented at `/swagger-ui.html` (OpenAPI JSON at `/v3/api-docs`).
+
+| Method | Endpoint | Purpose | Success |
+|---|---|---|---|
+| `GET` | `/notification_events` | List the calling client's events | `200` |
+| `GET` | `/notification_events/{notification_event_id}` | Event details + attempt history | `200` |
+| `POST` | `/notification_events/{notification_event_id}/replay` | Replay a failed event | `202` |
+
+`{notification_event_id}` is the business `event_id` (e.g. `EVT001`), consistent with the
+`event_id == notification_event_id` invariant. The internal surrogate key is never exposed.
+
+### Client identity
+
+There is no Spring Security in this service. Every request must carry an **`X-Client-Id`**
+header, which stands in for the authenticated principal; a missing header is `401`. A
+`client_id` query parameter is deliberately **not** accepted. Ownership is resolved through
+`notification_event.subscription_id -> subscription.client_id` and enforced in the
+application layer, so another client's event is reported as `404` rather than `403` — its
+existence is never revealed. Events that matched no subscription have no owner and are
+therefore invisible to every client.
+
+```bash
+curl -s -H 'X-Client-Id: CLIENT001'   'http://localhost:8080/notification_events?delivery_status=FAILED&page=0&size=20'
+```
+
+### Listing
+
+Optional filters: `from`, `to` (ISO-8601 instants, inclusive, on creation time) and
+`delivery_status`. Paged with `page` (default `0`) and `size` (default `20`, max `100`);
+a larger `size` is rejected rather than silently clamped. Results are newest first.
+
+```json
+{
+  "items": [
+    { "id": "EVT001", "eventType": "CREDIT_CARD_PAYMENT",
+      "createdAt": "2026-10-05T15:30:00Z", "status": "FAILED",
+      "attemptCount": 3, "lastHttpStatus": 500 }
+  ],
+  "page": 0, "size": 20, "totalElements": 1, "totalPages": 1
+}
+```
+
+### Replay
+
+Replay is allowed only from the terminal `FAILED` state and is asynchronous: it performs
+the `FAILED -> PENDING` transition, returns `202`, and the existing dispatch scheduler picks
+the event up on its next sweep. No webhook call happens on the request thread. Any other
+state yields `409` with code `NOTIFICATION_EVENT_NOT_REPLAYABLE`. Concurrent replays are
+resolved by the existing optimistic locking, so exactly one succeeds and the event is never
+replayed twice.
+
+### Errors
+
+Every failure returns the same body, and never a stack trace, SQL or internal class name:
+
+```json
+{
+  "code": "RESOURCE_NOT_FOUND",
+  "message": "Resource not found",
+  "description": "Notification event EVT999 not found",
+  "path": "/notification_events/EVT999",
+  "datetime": "2026-10-05T15:30:00.123Z",
+  "correlationId": "0f1c...",
+  "errors": null
+}
+```
+
+Codes: `RESOURCE_NOT_FOUND` (404), `INVALID_REQUEST` (400), `VALIDATION_ERROR` (400, with
+`errors[]`), `RESOURCE_CONFLICT` / `NOTIFICATION_EVENT_NOT_REPLAYABLE` (409), `UNAUTHORIZED`
+(401), `INTERNAL_ERROR` (500).
+
+Requests may supply an `X-Correlation-Id` header; one is generated when absent. It is echoed
+on the response, included in error bodies and put in the logging MDC — the same header and
+MDC key the webhook client and Kafka consumer already use.
 
 ---
 
@@ -246,6 +327,10 @@ no `deliveries` table.
 | `notification_event` | `PENDING`, `DELIVERING`, `RETRY_SCHEDULED`, `COMPLETED`, `FAILED` |
 | `delivery_attempt` | `IN_PROGRESS`, `SUCCESS`, `FAILED` |
 
+Each `delivery_attempt` also records the `http_status` the webhook returned; it is
+`NULL` when no response arrived (connection failure, timeout, or an attempt recovered
+after exceeding the delivery lease).
+
 All three carry a `version` column for optimistic locking.
 
 ---
@@ -257,7 +342,7 @@ scripts/         run-tests.ps1 / run-tests.sh - Maven with a reachable Docker da
 src/main/java/com/fardorado/notification/
   domain/        model + state machine; no Spring, JPA, Kafka or Jackson
   application/   use cases, commands, ports (in/out), domain services
-  adapter/in/    messaging (Kafka consumer), scheduler
+  adapter/in/    web (REST controllers, DTOs, advice), messaging (Kafka consumer), scheduler
   adapter/out/   persistence (JPA entities, repositories, mappers), webhook client
   configuration/ properties, worker pool, scheduling
 ```
@@ -284,6 +369,8 @@ Dependencies point inward: `adapter → application → domain`.
 - **Lombok and MapStruct** are wired through `annotationProcessorPaths` in
   *both* the `default-compile` and `default-testCompile` executions of
   `maven-compiler-plugin`. Adding a processor means editing both.
-- **`TestRestTemplate` moved in Boot 4** to `org.springframework.boot.resttestclient`.
+- **`TestRestTemplate` moved in Boot 4** to `org.springframework.boot.resttestclient`, is
+  no longer auto-registered (annotate the test `@AutoConfigureTestRestTemplate`) and needs
+  `spring-boot-restclient` on the test classpath for `RestTemplateBuilder`.
 - Integration tests run the full Spring context against Testcontainers
   (`RANDOM_PORT`, `TestRestTemplate`), never MockMvc.

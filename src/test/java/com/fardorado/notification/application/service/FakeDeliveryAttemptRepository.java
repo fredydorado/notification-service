@@ -30,6 +30,7 @@ class FakeDeliveryAttemptRepository implements DeliveryAttemptRepository {
                     saved.getStatus(),
                     saved.getAttemptNumber(),
                     saved.getErrorMessage(),
+                    saved.getHttpStatus(),
                     saved.getCompletedAt(),
                     0L);
         } else {
@@ -39,6 +40,7 @@ class FakeDeliveryAttemptRepository implements DeliveryAttemptRepository {
                     saved.getStatus(),
                     saved.getAttemptNumber(),
                     saved.getErrorMessage(),
+                    saved.getHttpStatus(),
                     saved.getCompletedAt(),
                     (saved.getVersion() == null ? 0L : saved.getVersion()) + 1);
         }

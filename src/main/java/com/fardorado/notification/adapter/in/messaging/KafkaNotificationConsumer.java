@@ -2,6 +2,7 @@ package com.fardorado.notification.adapter.in.messaging;
 
 import java.util.Locale;
 
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -35,19 +36,13 @@ import com.fardorado.notification.domain.model.notification.EventType;
  * explicit, observable decision rather than a silent failure.</p>
  */
 @Component
+@RequiredArgsConstructor
 public class KafkaNotificationConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaNotificationConsumer.class);
 
     private final ProcessNotificationEventUseCase processNotificationEventUseCase;
     private final JsonMapper jsonMapper;
-
-    public KafkaNotificationConsumer(
-            ProcessNotificationEventUseCase processNotificationEventUseCase,
-            JsonMapper jsonMapper) {
-        this.processNotificationEventUseCase = processNotificationEventUseCase;
-        this.jsonMapper = jsonMapper;
-    }
 
     @KafkaListener(topics = "${notification.kafka.topic:notification-events}")
     public void consume(String message, Acknowledgment acknowledgment) {

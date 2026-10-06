@@ -70,7 +70,7 @@ class DeliveryAttemptPersistenceIntTest {
                 .getFirst();
 
         Instant completedAt = Instant.now();
-        loaded.markSuccess(completedAt);
+        loaded.markSuccess(200, completedAt);
         DeliveryAttempt completed = deliveryAttemptRepository.save(loaded);
 
         assertThat(completed.getStatus()).isEqualTo(DeliveryAttemptStatus.SUCCESS);
@@ -165,10 +165,10 @@ class DeliveryAttemptPersistenceIntTest {
                 .findByNotificationEventIdOrderByAttemptNumber(saved.getNotificationEventId())
                 .getFirst();
 
-        firstLoad.markFailed("webhook endpoint returned HTTP 500", Instant.now());
+        firstLoad.markFailed("webhook endpoint returned HTTP 500", 500, Instant.now());
         deliveryAttemptRepository.save(firstLoad);
 
-        secondLoad.markFailed("webhook endpoint returned HTTP 500", Instant.now());
+        secondLoad.markFailed("webhook endpoint returned HTTP 500", 500, Instant.now());
         assertThatThrownBy(() -> deliveryAttemptRepository.save(secondLoad))
                 .isInstanceOf(OptimisticLockingFailureException.class);
     }

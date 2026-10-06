@@ -58,19 +58,20 @@ public class WebhookChannelClientImpl implements NotificationChannelClient {
             return request.exchange((req, response) -> {
                 HttpStatusCode status = response.getStatusCode();
                 if (status.is2xxSuccessful()) {
-                    return WebhookDeliveryResult.success();
+                    return WebhookDeliveryResult.success(status.value());
                 }
                 String reason = "webhook endpoint returned HTTP %d".formatted(status.value());
                 return isRetryable(status)
-                        ? WebhookDeliveryResult.retryableFailure(reason)
-                        : WebhookDeliveryResult.permanentFailure(reason);
+                        ? WebhookDeliveryResult.retryableFailure(reason, status.value())
+                        : WebhookDeliveryResult.permanentFailure(reason, status.value());
             });
         } catch (RuntimeException e) {
             // Timeouts and connection failures (e.g. the endpoint is briefly
             // unavailable) are retryable; the retry policy bounds the total
-            // number of attempts.
+            // number of attempts. No response arrived, so there is no HTTP
+            // status to record.
             return WebhookDeliveryResult.retryableFailure(
-                    "webhook call failed: " + e.getClass().getSimpleName());
+                    "webhook call failed: " + e.getClass().getSimpleName(), null);
         }
     }
 

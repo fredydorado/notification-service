@@ -55,6 +55,14 @@ public class DeliveryAttemptEntity {
     @Column(name = "error_message", columnDefinition = "text")
     private String errorMessage;
 
+    /**
+     * HTTP status returned by the webhook endpoint, or {@code null} when no
+     * response was received (connection failure, timeout) or the attempt was
+     * recovered after exceeding the delivery lease.
+     */
+    @Column(name = "http_status")
+    private Integer httpStatus;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;

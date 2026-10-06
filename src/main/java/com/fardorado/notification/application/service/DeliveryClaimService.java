@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -42,6 +43,7 @@ import com.fardorado.notification.domain.model.subscription.Subscription;
  * instances or workers never prepare the same event concurrently.</p>
  */
 @Component
+@RequiredArgsConstructor
 public class DeliveryClaimService {
 
     private static final Logger log = LoggerFactory.getLogger(DeliveryClaimService.class);
@@ -52,21 +54,6 @@ public class DeliveryClaimService {
     private final RetryPolicy retryPolicy;
     private final NotificationProcessingProperties properties;
     private final Clock clock;
-
-    public DeliveryClaimService(
-            NotificationEventRepository notificationEventRepository,
-            DeliveryAttemptRepository deliveryAttemptRepository,
-            SubscriptionRepository subscriptionRepository,
-            RetryPolicy retryPolicy,
-            NotificationProcessingProperties properties,
-            Clock clock) {
-        this.notificationEventRepository = notificationEventRepository;
-        this.deliveryAttemptRepository = deliveryAttemptRepository;
-        this.subscriptionRepository = subscriptionRepository;
-        this.retryPolicy = retryPolicy;
-        this.properties = properties;
-        this.clock = clock;
-    }
 
     @Transactional
     public List<ProcessDeliveryCommand> claimDeliveries(int limit) {
@@ -127,7 +114,7 @@ public class DeliveryClaimService {
         List<DeliveryAttempt> staleAttempts = deliveryAttemptRepository
                 .findByNotificationEventIdAndStatus(event.getId(), DeliveryAttemptStatus.IN_PROGRESS);
         for (DeliveryAttempt attempt : staleAttempts) {
-            attempt.markFailed("stale delivery recovered after exceeding the delivery lease", now);
+            attempt.markFailed("stale delivery recovered after exceeding the delivery lease", null, now);
             deliveryAttemptRepository.save(attempt);
             log.warn(
                     "stale delivery recovered: eventId={}, notificationEventId={}, deliveryAttemptId={}, attemptNumber={}",

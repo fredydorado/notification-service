@@ -38,7 +38,7 @@ class ProcessDeliveryUseCaseImplTest {
             new FakeDeliveryAttemptRepository();
 
     private final AtomicReference<WebhookDeliveryResult> nextResult =
-            new AtomicReference<>(WebhookDeliveryResult.success());
+            new AtomicReference<>(WebhookDeliveryResult.success(200));
 
     private final NotificationChannelClient channelClient = new NotificationChannelClient() {
         @Override
@@ -68,7 +68,7 @@ class ProcessDeliveryUseCaseImplTest {
         Subscription subscription = subscriptionRepository.addSubscription(
                 "client-1", EventType.CREDIT_CARD_PAYMENT, SubscriptionStatus.ACTIVE);
         ClaimedDelivery claimed = claimDelivery(subscription, 1);
-        nextResult.set(WebhookDeliveryResult.success());
+        nextResult.set(WebhookDeliveryResult.success(200));
 
         useCase.processDelivery(claimed.command());
 
@@ -85,7 +85,7 @@ class ProcessDeliveryUseCaseImplTest {
         Subscription subscription = subscriptionRepository.addSubscription(
                 "client-1", EventType.CREDIT_CARD_PAYMENT, SubscriptionStatus.ACTIVE);
         ClaimedDelivery claimed = claimDelivery(subscription, 1);
-        nextResult.set(WebhookDeliveryResult.retryableFailure("webhook endpoint returned HTTP 500"));
+        nextResult.set(WebhookDeliveryResult.retryableFailure("webhook endpoint returned HTTP 500", 500));
 
         useCase.processDelivery(claimed.command());
 
@@ -102,7 +102,7 @@ class ProcessDeliveryUseCaseImplTest {
         Subscription subscription = subscriptionRepository.addSubscription(
                 "client-1", EventType.CREDIT_CARD_PAYMENT, SubscriptionStatus.ACTIVE);
         ClaimedDelivery claimed = claimDelivery(subscription, 2);
-        nextResult.set(WebhookDeliveryResult.retryableFailure("webhook endpoint returned HTTP 500"));
+        nextResult.set(WebhookDeliveryResult.retryableFailure("webhook endpoint returned HTTP 500", 500));
 
         useCase.processDelivery(claimed.command());
 
@@ -119,7 +119,7 @@ class ProcessDeliveryUseCaseImplTest {
         Subscription subscription = subscriptionRepository.addSubscription(
                 "client-1", EventType.CREDIT_CARD_PAYMENT, SubscriptionStatus.ACTIVE);
         ClaimedDelivery claimed = claimDelivery(subscription, 1);
-        nextResult.set(WebhookDeliveryResult.permanentFailure("webhook endpoint returned HTTP 404"));
+        nextResult.set(WebhookDeliveryResult.permanentFailure("webhook endpoint returned HTTP 404", 404));
 
         useCase.processDelivery(claimed.command());
 
@@ -154,7 +154,7 @@ class ProcessDeliveryUseCaseImplTest {
         Subscription subscription = subscriptionRepository.addSubscription(
                 "client-1", EventType.CREDIT_CARD_PAYMENT, SubscriptionStatus.ACTIVE);
         ClaimedDelivery claimed = claimDelivery(subscription, 1);
-        nextResult.set(WebhookDeliveryResult.success());
+        nextResult.set(WebhookDeliveryResult.success(200));
 
         // A concurrent transition (e.g. a stale-delivery recovery) modifies the
         // event first; the worker's stale update must not overwrite it.

@@ -73,7 +73,7 @@ class DeliveryClaimServiceTest {
                 "evt-2", NotificationEventStatus.RETRY_SCHEDULED, subscription.getId(), null);
         DeliveryAttempt first = deliveryAttemptRepository.save(
                 DeliveryAttempt.startAttempt(retryable.getId(), 1));
-        first.markFailed("webhook endpoint returned HTTP 500", NOW);
+        first.markFailed("webhook endpoint returned HTTP 500", 500, NOW);
         deliveryAttemptRepository.save(first);
         notificationEventRepository.stageClaimable(retryable);
 
@@ -154,7 +154,7 @@ class DeliveryClaimServiceTest {
         if (status != NotificationEventStatus.PENDING) {
             event = new NotificationEvent(
                     null, eventId, EventType.CREDIT_CARD_PAYMENT, 1, null,
-                    status, "content-" + eventId, subscriptionId, nextAttemptAt, null);
+                    status, "content-" + eventId, subscriptionId, nextAttemptAt, null, null);
         }
         return notificationEventRepository.save(event);
     }

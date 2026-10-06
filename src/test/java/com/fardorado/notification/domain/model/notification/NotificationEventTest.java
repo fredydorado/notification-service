@@ -144,6 +144,6 @@ class NotificationEventTest {
     private NotificationEvent newEvent(NotificationEventStatus status, int eventVersion) {
         return new NotificationEvent(
                 1L, "evt-1", EventType.CREDIT_CARD_PAYMENT, eventVersion, "corr-1",
-                status, "{}", null, null, 0L);
+                status, "{}", null, null, null, 0L);
     }
 }

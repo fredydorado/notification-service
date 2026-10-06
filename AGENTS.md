@@ -6,7 +6,8 @@ Single-module Spring Boot 4.1.1 / Java 21 / Maven service (`com.fardorado.notifi
 
 - No Maven wrapper (`mvnw` absent) — use the system `mvn`.
 - Run app: `mvn spring-boot:run`
-- All tests: `mvn test` — requires a reachable Docker daemon (Testcontainers). On Windows where Docker lives inside WSL2, use `.\scriptsun-tests.ps1` (or `./scripts/run-tests.sh`) instead; it passes every argument through to Maven.
+- All tests: `mvn test` — requires a reachable Docker daemon (Testcontainers). On Windows where Docker lives inside WSL2, use `.\scripts
+un-tests.ps1` (or `./scripts/run-tests.sh`) instead; it passes every argument through to Maven.
 - Single test class: `mvn test -Dtest=NotificationServiceApplicationTests`
 - Single method: `mvn test -Dtest=NotificationServiceApplicationTests#contextLoads`
 - Package: `mvn package`
@@ -18,7 +19,8 @@ Single-module Spring Boot 4.1.1 / Java 21 / Maven service (`com.fardorado.notifi
 - **Jackson 3, not Jackson 2.** Spring Boot 4 auto-configures `tools.jackson.databind.json.JsonMapper`. Jackson 2 (`com.fasterxml.jackson.databind`) is on the classpath only transitively and has **no bean**, so injecting its `ObjectMapper` compiles and then fails at startup with `No qualifying bean of type 'com.fasterxml.jackson.databind.ObjectMapper'`. Annotations stay in `com.fasterxml.jackson.annotation`.
 - **`windows-unixdomain-tmpdir` profile in `pom.xml`.** On Windows setups where security software holds `%TEMP%`, the AF_UNIX socket behind `Selector.open()` cannot be connected to, and anything selector-based (JDK `HttpServer` test stubs, Kafka clients, Testcontainers) dies with `Unable to establish loopback connection`. The profile redirects `jdk.net.unixdomain.tmpdir` to `target/`. Do not "simplify" it away; `-Djava.io.tmpdir` is not an equivalent, since `UnixDomainSockets` reads the `TEMP` environment variable.
 - **Per-technology starter pattern.** The pom uses `spring-boot-starter-webmvc`, `spring-boot-starter-webmvc-test`, `spring-boot-starter-data-jpa-test`, `spring-boot-starter-kafka`, and `spring-boot-resttestclient`. Follow this pattern when adding dependencies.
-- **`TestRestTemplate` moved in Boot 4.** It lives in `org.springframework.boot.resttestclient` (artifact `spring-boot-resttestclient`), not in Boot 3's `org.springframework.boot.test.web.client`.
+- **`TestRestTemplate` moved in Boot 4, and needs two extra things.** It lives in `org.springframework.boot.resttestclient` (artifact `spring-boot-resttestclient`), not in Boot 3's `org.springframework.boot.test.web.client`. It is also **no longer auto-registered** for `RANDOM_PORT`: the test class must be annotated `@AutoConfigureTestRestTemplate`, or the context fails with *No qualifying bean of type 'TestRestTemplate'*. And it is built on `RestTemplateBuilder`, which is **not** pulled in transitively, so `spring-boot-restclient` must be a test dependency too, or the context fails with `NoClassDefFoundError: org/springframework/boot/restclient/RestTemplateBuilder`. `NotificationEventControllerIntTest` is the worked example.
+- **No `(:param is null or ...)` in JPQL against PostgreSQL.** Optional filters written that way make Postgres fail with `could not determine data type of parameter $N`, because the null bind is untyped. Build optional filters as a Spring Data `Specification` instead, so an unsupplied filter never reaches the SQL — see `NotificationEventRepositoryImpl.ownedBy`.
 - **Lombok is wired manually.** Annotation processing is configured via `annotationProcessorPaths` in `maven-compiler-plugin` (both `default-compile` and `default-testCompile`). Adding another annotation processor (e.g. MapStruct) means editing both executions in `pom.xml`.
 
 ## Mandatory rule docs (already loaded via `opencode.json` → `docs/ai/rules/*.md`)
@@ -33,4 +35,5 @@ Read before writing any code — these are enforced conventions, not suggestions
 
 - Messaging: Kafka (`spring-boot-starter-kafka`).
 - Persistence: PostgreSQL. Liquibase owns the schema (`src/main/resources/db/changelog`, three tables: `subscription`, `notification_event`, `delivery_attempt` — deliberately no `deliveries` table) and `ddl-auto` is `validate`, so entity/column mismatches fail at startup.
-- API docs: springdoc-openapi 3.1.0.
+- API docs: springdoc-openapi 3.1.0. The REST layer lives in `adapter/in/web`: the `*Controller` interface carries every OpenAPI annotation, the `impl` package holds the `*ControllerImpl`, and `advice/GlobalExceptionHandler` maps exceptions onto `ErrorResponseDto`.
+- **REST client identity is the `X-Client-Id` header.** There is no Spring Security in this project; the header stands in for the authenticated principal, and ownership is enforced by the use cases (via `notification_event.subscription_id -> subscription.client_id`), never by the controller. A missing header is a 401. Never add a `client_id` query parameter.

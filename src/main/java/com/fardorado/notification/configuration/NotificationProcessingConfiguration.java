@@ -15,7 +15,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  */
 @Configuration
 @EnableScheduling
-@EnableConfigurationProperties(NotificationProcessingProperties.class)
+@EnableConfigurationProperties({NotificationProcessingProperties.class, NotificationApiProperties.class})
 public class NotificationProcessingConfiguration {
 
     @Bean

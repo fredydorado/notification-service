@@ -26,6 +26,11 @@ public class NotificationEvent {
     private final String payload;
     private final Long subscriptionId;
     /**
+     * When the event was first persisted. Assigned by the persistence
+     * layer, so it is {@code null} on a not yet persisted event.
+     */
+    private final Instant createdAt;
+    /**
      * Opaque concurrency token managed by the persistence layer. The domain
      * never modifies it; it is carried so that stale updates can be detected
      * at the persistence boundary.
@@ -55,6 +60,7 @@ public class NotificationEvent {
                 payload,
                 subscriptionId,
                 null,
+                null,
                 null);
     }
 
@@ -71,6 +77,7 @@ public class NotificationEvent {
             String payload,
             Long subscriptionId,
             Instant nextAttemptAt,
+            Instant createdAt,
             Long version) {
         this.id = id;
         this.eventId = Objects.requireNonNull(eventId, "eventId must not be null");
@@ -84,6 +91,7 @@ public class NotificationEvent {
         this.payload = Objects.requireNonNull(payload, "payload must not be null");
         this.subscriptionId = subscriptionId;
         this.nextAttemptAt = nextAttemptAt;
+        this.createdAt = createdAt;
         this.version = version;
     }
 
@@ -193,6 +201,10 @@ public class NotificationEvent {
 
     public Instant getNextAttemptAt() {
         return nextAttemptAt;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
     }
 
     public Long getVersion() {

@@ -71,7 +71,7 @@ public class DeliveryResultService {
         try {
             switch (result.outcome()) {
                 case SUCCESS -> {
-                    attempt.markSuccess(completedAt);
+                    attempt.markSuccess(result.httpStatus(), completedAt);
                     event.markCompleted();
                     log.info(
                             "delivery succeeded: eventId={}, notificationEventId={}, deliveryAttemptId={}, attemptNumber={}",
@@ -79,7 +79,7 @@ public class DeliveryResultService {
                             command.attemptNumber());
                 }
                 case RETRYABLE_FAILURE -> {
-                    attempt.markFailed(result.errorMessage(), completedAt);
+                    attempt.markFailed(result.errorMessage(), result.httpStatus(), completedAt);
                     if (retryPolicy.isExhausted(command.attemptNumber())) {
                         event.markFailed();
                         log.warn(
@@ -95,7 +95,7 @@ public class DeliveryResultService {
                     }
                 }
                 case PERMANENT_FAILURE -> {
-                    attempt.markFailed(result.errorMessage(), completedAt);
+                    attempt.markFailed(result.errorMessage(), result.httpStatus(), completedAt);
                     event.markFailed();
                     log.warn(
                             "notification failed permanently: eventId={}, notificationEventId={}, attemptNumber={}, error={}",

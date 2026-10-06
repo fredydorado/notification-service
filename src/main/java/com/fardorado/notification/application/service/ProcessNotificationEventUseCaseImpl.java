@@ -1,5 +1,6 @@
 package com.fardorado.notification.application.service;
 
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -23,19 +24,13 @@ import com.fardorado.notification.domain.model.subscription.Subscription;
  * only persistence (no external calls happen here).</p>
  */
 @Component
+@RequiredArgsConstructor
 public class ProcessNotificationEventUseCaseImpl implements ProcessNotificationEventUseCase {
 
     private static final Logger log = LoggerFactory.getLogger(ProcessNotificationEventUseCaseImpl.class);
 
     private final NotificationEventRepository notificationEventRepository;
     private final SubscriptionMatcher subscriptionMatcher;
-
-    public ProcessNotificationEventUseCaseImpl(
-            NotificationEventRepository notificationEventRepository,
-            SubscriptionMatcher subscriptionMatcher) {
-        this.notificationEventRepository = notificationEventRepository;
-        this.subscriptionMatcher = subscriptionMatcher;
-    }
 
     @Transactional
     @Override

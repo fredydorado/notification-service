@@ -94,6 +94,14 @@ databaseChangeLog:
                   name: status
               - column:
                   name: created_at
+        - createIndex:
+            tableName: notification_event
+            indexName: idx_notification_event_subscription_id_created_at
+            columns:
+              - column:
+                  name: subscription_id
+              - column:
+                  name: created_at
         - sql:
             dbms: postgresql
             splitStatements: false

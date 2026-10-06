@@ -121,6 +121,8 @@ class EventProcessingFlowIntTest {
         assertThat(attempts).hasSize(1);
         assertThat(attempts.getFirst().get("status")).isEqualTo("SUCCESS");
         assertThat(attempts.getFirst().get("attempt_number")).isEqualTo(1);
+        // The webhook's HTTP status is captured on the attempt.
+        assertThat(attempts.getFirst().get("http_status")).isEqualTo(200);
 
         // The delivered payload carries the event envelope with the event id
         // and content.
@@ -178,6 +180,7 @@ class EventProcessingFlowIntTest {
         assertThat(attempts).hasSize(1);
         assertThat(attempts.getFirst().get("status")).isEqualTo("FAILED");
         assertThat((String) attempts.getFirst().get("error_message")).contains("HTTP 404");
+        assertThat(attempts.getFirst().get("http_status")).isEqualTo(404);
     }
 
     @Test
@@ -215,6 +218,10 @@ class EventProcessingFlowIntTest {
                 .containsExactly("FAILED", "SUCCESS");
         assertThat((String) attempts.getFirst().get("error_message"))
                 .contains("stale delivery recovered");
+        // No response was ever received for the recovered attempt, but the
+        // retry that followed it reached the endpoint.
+        assertThat(attempts.getFirst().get("http_status")).isNull();
+        assertThat(attempts.getLast().get("http_status")).isEqualTo(200);
     }
 
     private void seedSubscription(String clientId, EventType eventType, String webhookUrl) {
@@ -251,7 +258,7 @@ class EventProcessingFlowIntTest {
     private List<Map<String, Object>> attemptsOf(String eventId) {
         return jdbcTemplate.queryForList(
                 """
-                SELECT da.attempt_number, da.status, da.error_message
+                SELECT da.attempt_number, da.status, da.error_message, da.http_status
                   FROM delivery_attempt da
                   JOIN notification_event ne ON da.notification_event_id = ne.id
                  WHERE ne.event_id = ?

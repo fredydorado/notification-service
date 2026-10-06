@@ -19,6 +19,12 @@ public class DeliveryAttempt {
     private final Long notificationEventId;
     private final int attemptNumber;
     private String errorMessage;
+    /**
+     * HTTP status returned by the webhook endpoint, or {@code null} when no
+     * response was received (connection failure, timeout) or the attempt was
+     * recovered after exceeding the delivery lease.
+     */
+    private Integer httpStatus;
     private Instant completedAt;
     /**
      * Opaque concurrency token managed by the persistence layer. The domain
@@ -36,7 +42,7 @@ public class DeliveryAttempt {
             Long notificationEventId,
             int attemptNumber) {
         return new DeliveryAttempt(
-                null, notificationEventId, DeliveryAttemptStatus.IN_PROGRESS, attemptNumber, null, null, null);
+                null, notificationEventId, DeliveryAttemptStatus.IN_PROGRESS, attemptNumber, null, null, null, null);
     }
 
     /**
@@ -48,6 +54,7 @@ public class DeliveryAttempt {
             DeliveryAttemptStatus status,
             int attemptNumber,
             String errorMessage,
+            Integer httpStatus,
             Instant completedAt,
             Long version) {
         this.id = id;
@@ -59,15 +66,19 @@ public class DeliveryAttempt {
         }
         this.attemptNumber = attemptNumber;
         this.errorMessage = errorMessage;
+        this.httpStatus = httpStatus;
         this.completedAt = completedAt;
         this.version = version;
     }
 
     /**
      * Marks the attempt as successfully completed.
+     *
+     * @param httpStatus status returned by the webhook endpoint
      */
-    public void markSuccess(Instant completedAt) {
+    public void markSuccess(Integer httpStatus, Instant completedAt) {
         transitionTo(DeliveryAttemptStatus.SUCCESS, DeliveryAttemptStatus.IN_PROGRESS);
+        this.httpStatus = httpStatus;
         this.completedAt = completedAt;
     }
 
@@ -76,10 +87,14 @@ public class DeliveryAttempt {
      *
      * <p>The error message must not contain credentials, tokens or any other
      * sensitive information.</p>
+     *
+     * @param httpStatus status returned by the webhook endpoint, or
+     *                   {@code null} when no response was received
      */
-    public void markFailed(String errorMessage, Instant completedAt) {
+    public void markFailed(String errorMessage, Integer httpStatus, Instant completedAt) {
         transitionTo(DeliveryAttemptStatus.FAILED, DeliveryAttemptStatus.IN_PROGRESS);
         this.errorMessage = errorMessage;
+        this.httpStatus = httpStatus;
         this.completedAt = completedAt;
     }
 
@@ -112,6 +127,10 @@ public class DeliveryAttempt {
 
     public String getErrorMessage() {
         return errorMessage;
+    }
+
+    public Integer getHttpStatus() {
+        return httpStatus;
     }
 
     public Instant getCompletedAt() {

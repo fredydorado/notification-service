@@ -1,5 +1,6 @@
 package com.fardorado.notification.application.service;
 
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -21,19 +22,13 @@ import com.fardorado.notification.application.port.out.WebhookDeliveryResult;
  * inconsistent state.</p>
  */
 @Component
+@RequiredArgsConstructor
 public class ProcessDeliveryUseCaseImpl implements ProcessDeliveryUseCase {
 
     private static final Logger log = LoggerFactory.getLogger(ProcessDeliveryUseCaseImpl.class);
 
     private final NotificationChannelClient notificationChannelClient;
     private final DeliveryResultService deliveryResultService;
-
-    public ProcessDeliveryUseCaseImpl(
-            NotificationChannelClient notificationChannelClient,
-            DeliveryResultService deliveryResultService) {
-        this.notificationChannelClient = notificationChannelClient;
-        this.deliveryResultService = deliveryResultService;
-    }
 
     @Override
     public void processDelivery(ProcessDeliveryCommand command) {
@@ -51,7 +46,7 @@ public class ProcessDeliveryUseCaseImpl implements ProcessDeliveryUseCase {
             deliveryResultService.recordDeliveryResult(
                     command,
                     WebhookDeliveryResult.retryableFailure(
-                            "unexpected delivery failure: " + e.getClass().getSimpleName()));
+                            "unexpected delivery failure: " + e.getClass().getSimpleName(), null));
         } finally {
             MDC.remove("eventId");
             MDC.remove("correlationId");

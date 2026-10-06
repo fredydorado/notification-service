@@ -4,7 +4,10 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+import com.fardorado.notification.application.result.NotificationEventSummaryResult;
+import com.fardorado.notification.application.result.PagedResult;
 import com.fardorado.notification.domain.model.notification.NotificationEvent;
+import com.fardorado.notification.domain.model.notification.NotificationEventStatus;
 
 /**
  * Output port for persisting and reading notification events.
@@ -21,6 +24,36 @@ public interface NotificationEventRepository {
      * basis for idempotent event ingestion.
      */
     Optional<NotificationEvent> findByEventId(String eventId);
+
+    /**
+     * Finds a notification event by its canonical identity, but only if it is
+     * owned by the given client. Ownership runs through the matched
+     * subscription ({@code notification_event.subscription_id ->
+     * subscription.client_id}); an event that matched no subscription has no
+     * owner and is therefore never returned.
+     *
+     * <p>Returning an empty result for both "does not exist" and "belongs to
+     * another client" is deliberate: the API must not reveal the existence of
+     * another client's resource.</p>
+     */
+    Optional<NotificationEvent> findByEventIdAndClientId(String eventId, String clientId);
+
+    /**
+     * Returns one page of the given client's notification events, newest
+     * first, together with each event's attempt count and the HTTP status of
+     * its most recent delivery attempt.
+     *
+     * @param from   inclusive lower bound on creation time, or {@code null}
+     * @param to     inclusive upper bound on creation time, or {@code null}
+     * @param status status filter, or {@code null} for every status
+     */
+    PagedResult<NotificationEventSummaryResult> findSummariesByClientId(
+            String clientId,
+            Instant from,
+            Instant to,
+            NotificationEventStatus status,
+            int page,
+            int size);
 
     /**
      * Claims up to {@code limit} events that are ready for delivery work,

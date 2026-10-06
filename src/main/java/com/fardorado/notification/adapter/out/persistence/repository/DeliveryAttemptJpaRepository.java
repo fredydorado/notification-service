@@ -1,5 +1,6 @@
 package com.fardorado.notification.adapter.out.persistence.repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -18,4 +19,12 @@ public interface DeliveryAttemptJpaRepository extends JpaRepository<DeliveryAtte
     List<DeliveryAttemptEntity> findByNotificationEventIdAndStatus(
             Long notificationEventId,
             DeliveryAttemptStatus status);
+
+    /**
+     * Loads the attempts of several notification events at once, so that a
+     * page of event summaries can be enriched with its attempt counts and
+     * last HTTP statuses without a query per event.
+     */
+    List<DeliveryAttemptEntity> findByNotificationEventIdInOrderByAttemptNumberAsc(
+            Collection<Long> notificationEventIds);
 }

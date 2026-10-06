@@ -28,7 +28,7 @@ class DeliveryAttemptTest {
     void shouldMarkSuccess() {
         DeliveryAttempt attempt = DeliveryAttempt.startAttempt(42L, 1);
 
-        attempt.markSuccess(COMPLETED_AT);
+        attempt.markSuccess(200, COMPLETED_AT);
 
         assertThat(attempt.getStatus()).isEqualTo(DeliveryAttemptStatus.SUCCESS);
         assertThat(attempt.getCompletedAt()).isEqualTo(COMPLETED_AT);
@@ -39,7 +39,7 @@ class DeliveryAttemptTest {
     void shouldMarkFailed() {
         DeliveryAttempt attempt = DeliveryAttempt.startAttempt(42L, 2);
 
-        attempt.markFailed("webhook endpoint returned HTTP 500", COMPLETED_AT);
+        attempt.markFailed("webhook endpoint returned HTTP 500", 500, COMPLETED_AT);
 
         assertThat(attempt.getStatus()).isEqualTo(DeliveryAttemptStatus.FAILED);
         assertThat(attempt.getCompletedAt()).isEqualTo(COMPLETED_AT);
@@ -49,15 +49,15 @@ class DeliveryAttemptTest {
     @Test
     void shouldRejectTransitionAfterTerminalState() {
         DeliveryAttempt successful = DeliveryAttempt.startAttempt(42L, 1);
-        successful.markSuccess(COMPLETED_AT);
-        assertThatThrownBy(() -> successful.markFailed("too late", COMPLETED_AT))
+        successful.markSuccess(200, COMPLETED_AT);
+        assertThatThrownBy(() -> successful.markFailed("too late", 500, COMPLETED_AT))
                 .isInstanceOf(InvalidStatusTransitionException.class);
 
         DeliveryAttempt failed = DeliveryAttempt.startAttempt(42L, 1);
-        failed.markFailed("webhook endpoint returned HTTP 500", COMPLETED_AT);
-        assertThatThrownBy(() -> failed.markSuccess(COMPLETED_AT))
+        failed.markFailed("webhook endpoint returned HTTP 500", 500, COMPLETED_AT);
+        assertThatThrownBy(() -> failed.markSuccess(200, COMPLETED_AT))
                 .isInstanceOf(InvalidStatusTransitionException.class);
-        assertThatThrownBy(() -> failed.markFailed("again", COMPLETED_AT))
+        assertThatThrownBy(() -> failed.markFailed("again", 500, COMPLETED_AT))
                 .isInstanceOf(InvalidStatusTransitionException.class);
     }
 

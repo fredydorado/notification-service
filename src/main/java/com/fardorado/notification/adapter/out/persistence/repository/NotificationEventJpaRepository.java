@@ -9,6 +9,7 @@ import jakarta.persistence.QueryHint;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.QueryHints;
@@ -17,7 +18,9 @@ import org.springframework.data.repository.query.Param;
 import com.fardorado.notification.adapter.out.persistence.entity.NotificationEventEntity;
 import com.fardorado.notification.domain.model.notification.NotificationEventStatus;
 
-public interface NotificationEventJpaRepository extends JpaRepository<NotificationEventEntity, Long> {
+public interface NotificationEventJpaRepository
+        extends JpaRepository<NotificationEventEntity, Long>,
+                JpaSpecificationExecutor<NotificationEventEntity> {
 
     Optional<NotificationEventEntity> findByEventId(String eventId);
 
@@ -54,4 +57,22 @@ public interface NotificationEventJpaRepository extends JpaRepository<Notificati
             @Param("now") Instant now,
             @Param("staleThreshold") Instant staleThreshold,
             Pageable pageable);
+
+    /**
+     * Ownership runs through the matched subscription: notification_event
+     * carries only subscription_id, and client_id lives on subscription.
+     * There is no association to navigate (subscriptionId is a plain scalar),
+     * hence the explicit join in the where clause.
+     */
+    @Query("""
+            select e
+              from NotificationEventEntity e, SubscriptionEntity s
+             where e.subscriptionId = s.id
+               and e.eventId = :eventId
+               and s.clientId = :clientId
+            """)
+    Optional<NotificationEventEntity> findByEventIdAndClientId(
+            @Param("eventId") String eventId,
+            @Param("clientId") String clientId);
+
 }
