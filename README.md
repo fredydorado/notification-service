@@ -10,6 +10,33 @@ architecture.
 
 ---
 
+## How this project was built
+
+This service was implemented from the software designs in
+[`docs/spec/design`](docs/spec/design): the C4 model under
+[`docs/spec/design/c4/`](docs/spec/design/c4) — `C4_01_SystemContext.png`,
+`C4_02_Container.png`, `C4_03_Components.png`, `C4_04_DatabaseSchema.png`,
+`C4_KeyDecisionsAndAssumptions.png` — and the event lifecycle in
+[`notification-event-state-machine.png`](docs/spec/design/notification-event-state-machine.png).
+Those designs were themselves created from the requirements in
+[`docs/spec/SrSoftwareEngineer_Notifications.pdf`](docs/spec/SrSoftwareEngineer_Notifications.pdf).
+
+The project was also **designed and developed primarily using AI coding agents**
+(OpenCode and Claude Code):
+
+- The agents generated the majority of the code, working from the design diagrams in
+  `docs/spec/design` and the feature specifications in
+  [`docs/spec/features/`](docs/spec/features) —
+  [`001_createPersistenceComponents.md`](docs/spec/features/001_createPersistenceComponents.md),
+  [`002_EventProcessingComponents.md`](docs/spec/features/002_EventProcessingComponents.md)
+  and [`003_RestNotificationService.md`](docs/spec/features/003_RestNotificationService.md).
+- They worked within the architecture, naming and project rules defined in
+  [`docs/ai/rules/`](docs/ai/rules) — `ARCHITECTURE_CONVENTIONS.md`,
+  `NAMING_CONVENTIONS.md` and `PROJECT_GUIDELINES.md` — which are enforced
+  conventions, not suggestions.
+
+---
+
 ## Requirements
 
 | | |
@@ -29,6 +56,9 @@ mvn package
 ```bash
 mvn spring-boot:run
 ```
+
+Once it is up, the interactive API documentation is at
+<http://localhost:8080/swagger-ui.html>.
 
 The app expects a reachable PostgreSQL and Kafka; Liquibase owns the schema and
 `spring.jpa.hibernate.ddl-auto` is `validate`, so Hibernate never creates tables.
@@ -205,7 +235,18 @@ notification event has been durably persisted.
 
 ## REST API
 
-Three endpoints, documented at `/swagger-ui.html` (OpenAPI JSON at `/v3/api-docs`).
+Three endpoints. With the service running locally (`mvn spring-boot:run`), the
+OpenAPI documentation is served at:
+
+| | |
+|---|---|
+| Swagger UI | <http://localhost:8080/swagger-ui.html> |
+| OpenAPI JSON | <http://localhost:8080/v3/api-docs> |
+
+These are the springdoc defaults (`springdoc-openapi-starter-webmvc-ui`, see
+[`pom.xml`](pom.xml)): `application.yaml` overrides neither `server.port` nor any
+`springdoc.*` path. The API title and version come from
+[`OpenApiConfiguration`](src/main/java/com/fardorado/notification/configuration/OpenApiConfiguration.java).
 
 | Method | Endpoint | Purpose | Success |
 |---|---|---|---|
@@ -353,10 +394,15 @@ Dependencies point inward: `adapter → application → domain`.
 
 ## Documentation
 
-- `docs/spec/` — requirements and C4 design
+- `docs/spec/SrSoftwareEngineer_Notifications.pdf` — the original requirements
+- `docs/spec/design/` — software design: C4 model (`c4/`) and the notification event
+  state machine
 - `docs/spec/features/` — per-feature specifications
 - `docs/ai/rules/` — enforced architecture, naming and project conventions
 - `AGENTS.md` — orientation for coding agents
+
+See [How this project was built](#how-this-project-was-built) for how these documents
+drove the implementation.
 
 ---
 

@@ -48,6 +48,7 @@ public class ProcessNotificationEventUseCaseImpl implements ProcessNotificationE
 
         NotificationEvent event;
         if (matched != null) {
+            //The event is marked as PENDING
             event = NotificationEvent.newEvent(
                     command.eventId(),
                     command.eventType(),
@@ -66,6 +67,7 @@ public class ProcessNotificationEventUseCaseImpl implements ProcessNotificationE
                     command.correlationId(),
                     command.content(),
                     null);
+            //The event is marked as FAILED
             event.markUnmatched();
             log.warn(
                     "no active subscription matched: eventId={}, clientId={}, eventType={} (event failed)",
