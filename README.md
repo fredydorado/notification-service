@@ -4,7 +4,7 @@ Consumes notification events from Kafka, matches them against active client
 subscriptions and delivers them to the subscriber's webhook, with durable,
 database-backed retries.
 
-Single-module **Spring Boot 4.1.1 / Java 21 / Maven** service, package root
+Single-module **Spring Boot 4.1.1 / Java 21 (VirtualThreads) / Maven** service, package root
 `com.fardorado.notification`, built on a hexagonal (ports & adapters)
 architecture.
 
@@ -34,6 +34,9 @@ The project was also **designed and developed primarily using AI coding agents**
   [`docs/ai/rules/`](docs/ai/rules) — `ARCHITECTURE_CONVENTIONS.md`,
   `NAMING_CONVENTIONS.md` and `PROJECT_GUIDELINES.md` — which are enforced
   conventions, not suggestions.
+
+Finally, as a comment, one of the requirements was to use the src/test/resources/sample/notification_events.json to test the solution. 
+So this file was used to test this specific scenario in KafkaNotificationConsumerIntTest. 
 
 ---
 
