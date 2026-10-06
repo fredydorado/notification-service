@@ -4,7 +4,6 @@ import java.util.List;
 import java.util.Optional;
 
 import com.fardorado.notification.domain.model.notification.EventType;
-import com.fardorado.notification.domain.model.notification.NotificationChannel;
 import com.fardorado.notification.domain.model.subscription.Subscription;
 import com.fardorado.notification.domain.model.subscription.SubscriptionStatus;
 
@@ -17,8 +16,8 @@ public interface SubscriptionRepository {
 
     Optional<Subscription> findById(Long id);
 
-    List<Subscription> findByEventTypeAndChannelAndStatus(
+    List<Subscription> findByClientIdAndEventTypeAndStatus(
+            String clientId,
             EventType eventType,
-            NotificationChannel channel,
             SubscriptionStatus status);
 }

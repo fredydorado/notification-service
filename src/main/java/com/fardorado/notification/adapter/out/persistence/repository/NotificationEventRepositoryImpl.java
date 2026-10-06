@@ -1,5 +1,6 @@
 package com.fardorado.notification.adapter.out.persistence.repository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -37,17 +38,27 @@ public class NotificationEventRepositoryImpl implements NotificationEventReposit
         return jpaRepository.findById(id).map(mapper::toDomain);
     }
 
+    @Override
+    public Optional<NotificationEvent> findByEventId(String eventId) {
+        return jpaRepository.findByEventId(eventId).map(mapper::toDomain);
+    }
+
     /**
-     * Claims events that are eligible for a retry. The underlying query uses
-     * {@code FOR UPDATE SKIP LOCKED}, so the call must run inside a
+     * Claims events that are ready for delivery work. The underlying query
+     * uses {@code FOR UPDATE SKIP LOCKED}, so the call must run inside a
      * transaction; the row locks are held until that transaction commits.
      */
     @Transactional
     @Override
-    public List<NotificationEvent> claimRetryEligible(int limit) {
+    public List<NotificationEvent> claimDeliverable(int limit, Instant now, Instant staleThreshold) {
         return jpaRepository
-                .findByStatusForClaim(
-                        NotificationEventStatus.RETRY_SCHEDULED, PageRequest.of(0, limit))
+                .findClaimableEvents(
+                        NotificationEventStatus.PENDING,
+                        NotificationEventStatus.RETRY_SCHEDULED,
+                        NotificationEventStatus.DELIVERING,
+                        now,
+                        staleThreshold,
+                        PageRequest.of(0, limit))
                 .stream()
                 .map(mapper::toDomain)
                 .toList();

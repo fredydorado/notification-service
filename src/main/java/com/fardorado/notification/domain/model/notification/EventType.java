@@ -10,5 +10,13 @@ package com.fardorado.notification.domain.model.notification;
 public enum EventType {
     CREDIT_CARD_PAYMENT,
     CASH_WITHDRAWAL,
-    CREDIT_TRANSFER
+    CREDIT_TRANSFER,
+    DEBIT_CARD_WITHDRAWAL,
+    DEBIT_AUTOMATIC_PAYMENT,
+    CREDIT_REFUND,
+    DEBIT_TRANSFER,
+    CREDIT_DEPOSIT,
+    DEBIT_PURCHASE,
+    CREDIT_CASHBACK,
+    DEBIT_SUBSCRIPTION
 }

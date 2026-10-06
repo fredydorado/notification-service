@@ -19,7 +19,6 @@ import jakarta.persistence.Version;
 import org.hibernate.annotations.CreationTimestamp;
 
 import com.fardorado.notification.domain.model.delivery.DeliveryAttemptStatus;
-import com.fardorado.notification.domain.model.notification.NotificationChannel;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -45,10 +44,6 @@ public class DeliveryAttemptEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "notification_event_id", nullable = false)
     private NotificationEventEntity notificationEvent;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "channel", nullable = false, length = 20)
-    private NotificationChannel channel;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)

@@ -166,7 +166,7 @@ The database values must exactly match the Java enum names or the explicitly def
 
 # 6. `subscription`
 
-The `subscription` table represents a customer's subscription to a particular notification event type through a notification channel.
+The `subscription` table represents a customer's subscription to a particular notification event type. The only delivery channel is `WEBHOOK`, so the channel is not modeled as a column.
 
 Suggested structure:
 
@@ -174,11 +174,10 @@ Suggested structure:
 subscription
 --------------
 id
-subscriber_id
+client_id
 event_type
-channel
 status
-endpoint
+webhook_url
 created_at
 updated_at
 version
@@ -198,9 +197,9 @@ Primary Key: YES
 
 ---
 
-### `subscriber_id`
+### `client_id`
 
-The logical identifier of the subscriber this subscription belongs to.
+The logical identifier of the client this subscription belongs to.
 
 ```text
 Type: VARCHAR
@@ -211,7 +210,7 @@ Nullable: NO
 
 ### `event_type`
 
-The business event that the subscriber wants to receive notifications for.
+The business event that the client wants to receive notifications for.
 
 ```text
 Type: VARCHAR
@@ -224,6 +223,14 @@ Possible values currently defined by the domain:
 credit_card_payment
 cash_withdrawal
 credit_transfer
+debit_card_withdrawal
+debit_automatic_payment
+credit_refund
+debit_transfer
+credit_deposit
+debit_purchase
+credit_cashback
+debit_subscription
 ```
 
 The corresponding Java enum should represent these values.
@@ -234,7 +241,15 @@ Example:
 public enum EventType {
     CREDIT_CARD_PAYMENT,
     CASH_WITHDRAWAL,
-    CREDIT_TRANSFER
+    CREDIT_TRANSFER,
+    DEBIT_CARD_WITHDRAWAL,
+    DEBIT_AUTOMATIC_PAYMENT,
+    CREDIT_REFUND,
+    DEBIT_TRANSFER,
+    CREDIT_DEPOSIT,
+    DEBIT_PURCHASE,
+    CREDIT_CASHBACK,
+    DEBIT_SUBSCRIPTION
 }
 ```
 
@@ -242,42 +257,8 @@ public enum EventType {
 
 ```sql
 COMMENT ON COLUMN subscription.event_type IS
-'Possible values: credit_card_payment, cash_withdrawal, credit_transfer. Must correspond to the EventType Java enum.';
+'The business event type the client wants to be notified about. Values correspond to the EventType Java enum.';
 ```
-
----
-
-### `channel`
-
-The notification delivery channel.
-
-```text
-Type: VARCHAR
-Nullable: NO
-```
-
-Current supported value:
-
-```text
-WEBHOOK
-```
-
-Corresponding Java enum:
-
-```java
-public enum NotificationChannel {
-    WEBHOOK
-}
-```
-
-**Liquibase/SQL comment:**
-
-```sql
-COMMENT ON COLUMN subscription.channel IS
-'Possible values: WEBHOOK. Must correspond to the NotificationChannel Java enum.';
-```
-
-The design may be extended in the future with additional channels such as email or SMS, but a new channel must be explicitly added to the domain model and persistence contract.
 
 ---
 
@@ -315,12 +296,14 @@ COMMENT ON COLUMN subscription.status IS
 
 ---
 
-### `endpoint`
+### `webhook_url`
 
-The delivery endpoint of the subscription (e.g. the webhook URL).
+The webhook URL the notification payload is POSTed to.
+
+There is intentionally **no `channel` column**: the only supported delivery channel is `WEBHOOK`, so the channel is implicit in this column and need not be modeled. A new channel must be introduced as an explicit domain/persistence change (adding a channel discriminator) rather than by reusing this column.
 
 ```text
-Type: VARCHAR
+Type: TEXT
 Nullable: NO
 ```
 
@@ -381,9 +364,14 @@ Suggested structure:
 notification_event
 -------------------
 id
+event_id
 event_type
+event_version
+correlation_id
 status
 payload
+subscription_id
+next_attempt_at
 created_at
 updated_at
 version
@@ -403,6 +391,25 @@ Primary Key: YES
 
 ---
 
+### `event_id`
+
+The canonical identity of the source event received from the broker.
+
+The design uses `event_id == notification_event_id` semantics: the source event identity is preserved as the notification event identity and is used to enforce **idempotent ingestion** (repeated broker delivery of the same `event_id` must not create a second row).
+
+Enforced by a database unique constraint (the durable source of truth for event identity):
+
+```text
+UNIQUE(event_id)
+```
+
+```text
+Type: VARCHAR
+Nullable: NO
+```
+
+---
+
 ### `event_type`
 
 The type of business event.
@@ -418,6 +425,14 @@ Possible values:
 credit_card_payment
 cash_withdrawal
 credit_transfer
+debit_card_withdrawal
+debit_automatic_payment
+credit_refund
+debit_transfer
+credit_deposit
+debit_purchase
+credit_cashback
+debit_subscription
 ```
 
 Corresponding Java enum:
@@ -426,7 +441,15 @@ Corresponding Java enum:
 public enum EventType {
     CREDIT_CARD_PAYMENT,
     CASH_WITHDRAWAL,
-    CREDIT_TRANSFER
+    CREDIT_TRANSFER,
+    DEBIT_CARD_WITHDRAWAL,
+    DEBIT_AUTOMATIC_PAYMENT,
+    CREDIT_REFUND,
+    DEBIT_TRANSFER,
+    CREDIT_DEPOSIT,
+    DEBIT_PURCHASE,
+    CREDIT_CASHBACK,
+    DEBIT_SUBSCRIPTION
 }
 ```
 
@@ -434,7 +457,32 @@ public enum EventType {
 
 ```sql
 COMMENT ON COLUMN notification_event.event_type IS
-'Possible values: credit_card_payment, cash_withdrawal, credit_transfer. Must correspond to the EventType Java enum.';
+'The business event type. Values correspond to the EventType Java enum.';
+```
+
+---
+
+### `event_version`
+
+The version of the event contract/schema.
+
+This is **not** the same thing as the database optimistic-lock `version`.
+
+```text
+Type: INTEGER
+Nullable: NO
+Default: 1
+```
+
+---
+
+### `correlation_id`
+
+Correlation identifier propagated from the source event for logging and tracing.
+
+```text
+Type: VARCHAR
+Nullable: YES
 ```
 
 ---
@@ -494,6 +542,40 @@ The application should validate the payload before processing it.
 
 ---
 
+### `subscription_id`
+
+The subscription matched for `(client_id, event_type)` at ingestion time.
+
+`NULL` when no active subscription matched; in that case the notification event is persisted directly as `FAILED` (no delivery attempts are created for it).
+
+```text
+Type: BIGINT
+Nullable: YES
+Foreign Key: subscription(id)
+```
+
+Recommended foreign key:
+
+```text
+notification_event.subscription_id
+    → subscription.id
+```
+
+---
+
+### `next_attempt_at`
+
+Earliest time the next delivery attempt may run while the notification event is `RETRY_SCHEDULED`.
+
+Backs the database-backed retry schedule so that retry timing survives application restarts. `NULL` while no retry is scheduled.
+
+```text
+Type: TIMESTAMP WITH TIME ZONE
+Nullable: YES
+```
+
+---
+
 ### `created_at`
 
 Timestamp when the event was created/received.
@@ -550,7 +632,6 @@ delivery_attempt
 -----------------
 id
 notification_event_id
-channel
 status
 attempt_number
 error_message
@@ -590,38 +671,6 @@ Recommended foreign key:
 ```text
 delivery_attempt.notification_event_id
     → notification_event.id
-```
-
----
-
-### `channel`
-
-The channel used for the delivery attempt.
-
-```text
-Type: VARCHAR
-Nullable: NO
-```
-
-Current supported value:
-
-```text
-WEBHOOK
-```
-
-Corresponding Java enum:
-
-```java
-public enum NotificationChannel {
-    WEBHOOK
-}
-```
-
-**Liquibase/SQL comment:**
-
-```sql
-COMMENT ON COLUMN delivery_attempt.channel IS
-'Possible values: WEBHOOK. Must correspond to the NotificationChannel Java enum.';
 ```
 
 ---
@@ -771,15 +820,15 @@ At minimum, consider indexes for:
 ### `subscription`
 
 ```text
-(event_type, channel, status)
+(event_type, status)
 ```
 
-This supports finding active subscription for a particular event and channel.
+This supports finding active subscriptions for a particular event type.
 
-The domain requires a single subscription per `(subscriber_id, event_type, channel)` combination, so the table enforces:
+The domain requires a single subscription per `(client_id, event_type)` combination, so the table enforces:
 
 ```text
-unique(subscriber_id, event_type, channel)
+unique(client_id, event_type)
 ```
 
 ---
@@ -793,6 +842,12 @@ Consider:
 ```
 
 This supports processing pending/retryable events.
+
+For due-retry claiming, also consider:
+
+```text
+(status, next_attempt_at)
+```
 
 ---
 
@@ -938,7 +993,13 @@ However, complex business rules should remain in the domain/application layer ra
 
 Relationships between tables must be explicitly represented using foreign keys.
 
-Required relationship:
+Required relationships:
+
+```text
+notification_event.subscription_id
+        ↓
+subscription.id
+```
 
 ```text
 delivery_attempt.notification_event_id
@@ -948,9 +1009,10 @@ notification_event.id
 
 Foreign keys must have explicit names.
 
-Example:
+Examples:
 
 ```text
+fk_notification_event_subscription
 fk_delivery_attempt_notification_event
 ```
 

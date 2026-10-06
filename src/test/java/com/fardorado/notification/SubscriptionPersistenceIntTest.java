@@ -15,12 +15,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.fardorado.notification.application.port.out.SubscriptionRepository;
 import com.fardorado.notification.domain.model.notification.EventType;
-import com.fardorado.notification.domain.model.notification.NotificationChannel;
 import com.fardorado.notification.domain.model.subscription.Subscription;
 import com.fardorado.notification.domain.model.subscription.SubscriptionStatus;
 
 @Import(TestcontainersConfiguration.class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "notification.processing.dispatch-enabled=false")
 class SubscriptionPersistenceIntTest {
 
     @Autowired
@@ -32,87 +31,62 @@ class SubscriptionPersistenceIntTest {
     @Test
     void shouldSaveAndFindSubscription() {
         Subscription saved = subscriptionRepository.save(Subscription.newSubscription(
-                "subscriber-1",
-                EventType.CREDIT_CARD_PAYMENT,
-                NotificationChannel.WEBHOOK,
-                "https://example.com/webhook"));
+                "client-1", EventType.CREDIT_CARD_PAYMENT, "https://example.com/webhook"));
 
         assertThat(saved.getId()).isNotNull();
         assertThat(saved.getVersion()).isEqualTo(0);
 
         Subscription loaded = subscriptionRepository.findById(saved.getId()).orElseThrow();
 
-        assertThat(loaded.getSubscriberId()).isEqualTo("subscriber-1");
+        assertThat(loaded.getClientId()).isEqualTo("client-1");
         assertThat(loaded.getEventType()).isEqualTo(EventType.CREDIT_CARD_PAYMENT);
-        assertThat(loaded.getChannel()).isEqualTo(NotificationChannel.WEBHOOK);
         assertThat(loaded.getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
-        assertThat(loaded.getEndpoint()).isEqualTo("https://example.com/webhook");
+        assertThat(loaded.getWebhookUrl()).isEqualTo("https://example.com/webhook");
     }
 
     @Test
     void shouldPersistEventTypeAsLowerCaseSnakeCase() {
         Subscription saved = subscriptionRepository.save(Subscription.newSubscription(
-                "subscriber-2",
-                EventType.CASH_WITHDRAWAL,
-                NotificationChannel.WEBHOOK,
-                "https://example.com/webhook"));
+                "client-2", EventType.DEBIT_CARD_WITHDRAWAL, "https://example.com/webhook"));
 
         String storedEventType = jdbcTemplate.queryForObject(
                 "SELECT event_type FROM subscription WHERE id = ?", String.class, saved.getId());
 
-        assertThat(storedEventType).isEqualTo("cash_withdrawal");
+        assertThat(storedEventType).isEqualTo("debit_card_withdrawal");
     }
 
     @Test
-    void shouldFindSubscriptionsByEventTypeChannelAndStatus() {
+    void shouldFindActiveSubscriptionByClientIdAndEventType() {
         subscriptionRepository.save(Subscription.newSubscription(
-                "subscriber-3",
-                EventType.CREDIT_CARD_PAYMENT,
-                NotificationChannel.WEBHOOK,
-                "https://a.example.com"));
-        subscriptionRepository.save(Subscription.newSubscription(
-                "subscriber-4",
-                EventType.CREDIT_CARD_PAYMENT,
-                NotificationChannel.WEBHOOK,
-                "https://b.example.com"));
-        subscriptionRepository.save(Subscription.newSubscription(
-                "subscriber-5",
-                EventType.CASH_WITHDRAWAL,
-                NotificationChannel.WEBHOOK,
-                "https://c.example.com"));
+                "client-3", EventType.CREDIT_CARD_PAYMENT, "https://a.example.com"));
+        Subscription inactive = subscriptionRepository.save(Subscription.newSubscription(
+                "client-4", EventType.CREDIT_CARD_PAYMENT, "https://b.example.com"));
+        inactive.deactivate();
+        subscriptionRepository.save(inactive);
 
-        List<Subscription> activeCreditCardPayments = subscriptionRepository.findByEventTypeAndChannelAndStatus(
-                EventType.CREDIT_CARD_PAYMENT, NotificationChannel.WEBHOOK, SubscriptionStatus.ACTIVE);
+        List<Subscription> activeForClient3 = subscriptionRepository.findByClientIdAndEventTypeAndStatus(
+                "client-3", EventType.CREDIT_CARD_PAYMENT, SubscriptionStatus.ACTIVE);
 
-        assertThat(activeCreditCardPayments)
-                .extracting(Subscription::getSubscriberId)
-                .contains("subscriber-3", "subscriber-4")
-                .doesNotContain("subscriber-5");
+        assertThat(activeForClient3)
+                .extracting(Subscription::getClientId)
+                .contains("client-3")
+                .doesNotContain("client-4");
     }
 
     @Test
-    void shouldRejectDuplicateSubscriberEventTypeChannelCombination() {
+    void shouldRejectDuplicateClientEventTypeCombination() {
         subscriptionRepository.save(Subscription.newSubscription(
-                "subscriber-6",
-                EventType.CREDIT_TRANSFER,
-                NotificationChannel.WEBHOOK,
-                "https://a.example.com"));
+                "client-5", EventType.CREDIT_TRANSFER, "https://a.example.com"));
 
         assertThatThrownBy(() -> subscriptionRepository.save(Subscription.newSubscription(
-                        "subscriber-6",
-                        EventType.CREDIT_TRANSFER,
-                        NotificationChannel.WEBHOOK,
-                        "https://b.example.com")))
+                        "client-5", EventType.CREDIT_TRANSFER, "https://b.example.com")))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
     void shouldRejectConcurrentModificationsViaOptimisticLocking() {
         Subscription saved = subscriptionRepository.save(Subscription.newSubscription(
-                "subscriber-7",
-                EventType.CREDIT_CARD_PAYMENT,
-                NotificationChannel.WEBHOOK,
-                "https://example.com/webhook"));
+                "client-6", EventType.CREDIT_CARD_PAYMENT, "https://example.com/webhook"));
 
         Subscription firstLoad = subscriptionRepository.findById(saved.getId()).orElseThrow();
         Subscription secondLoad = subscriptionRepository.findById(saved.getId()).orElseThrow();

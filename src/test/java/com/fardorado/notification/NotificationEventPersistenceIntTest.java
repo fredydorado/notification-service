@@ -26,7 +26,7 @@ import com.fardorado.notification.domain.model.notification.NotificationEvent;
 import com.fardorado.notification.domain.model.notification.NotificationEventStatus;
 
 @Import(TestcontainersConfiguration.class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "notification.processing.dispatch-enabled=false")
 class NotificationEventPersistenceIntTest {
 
     @Autowired
@@ -40,17 +40,23 @@ class NotificationEventPersistenceIntTest {
 
     @Test
     void shouldSaveAndFindEventWithJsonbPayload() {
-        NotificationEvent saved = notificationEventRepository.save(
-                NotificationEvent.newEvent(EventType.CREDIT_CARD_PAYMENT, "{\"card_last_four\": \"1234\"}"));
+        NotificationEvent saved = notificationEventRepository.save(NotificationEvent.newEvent(
+                "evt-1", EventType.CREDIT_CARD_PAYMENT, 1, "corr-1", "{\"card_last_four\": \"1234\"}", null));
 
         assertThat(saved.getId()).isNotNull();
         assertThat(saved.getVersion()).isEqualTo(0);
 
         NotificationEvent loaded = notificationEventRepository.findById(saved.getId()).orElseThrow();
 
+        assertThat(loaded.getEventId()).isEqualTo("evt-1");
         assertThat(loaded.getEventType()).isEqualTo(EventType.CREDIT_CARD_PAYMENT);
+        assertThat(loaded.getEventVersion()).isEqualTo(1);
+        assertThat(loaded.getCorrelationId()).isEqualTo("corr-1");
         assertThat(loaded.getStatus()).isEqualTo(NotificationEventStatus.PENDING);
         assertThat(loaded.getPayload()).isEqualTo("{\"card_last_four\": \"1234\"}");
+
+        NotificationEvent loadedByEventId = notificationEventRepository.findByEventId("evt-1").orElseThrow();
+        assertThat(loadedByEventId.getId()).isEqualTo(saved.getId());
 
         String payloadType = jdbcTemplate.queryForObject(
                 "SELECT pg_typeof(payload)::text FROM notification_event WHERE id = ?",
@@ -60,17 +66,29 @@ class NotificationEventPersistenceIntTest {
     }
 
     @Test
-    void shouldClaimRetryEligibleEventsOldestFirstExcludingOtherStatuses() throws InterruptedException {
-        NotificationEvent oldestRetryable = persistRetryScheduledEvent();
-        NotificationEvent newestRetryable = persistRetryScheduledEvent();
-        NotificationEvent pending =
-                notificationEventRepository.save(NotificationEvent.newEvent(EventType.CREDIT_TRANSFER, "{}"));
+    void shouldRejectDuplicateEventId() {
+        notificationEventRepository.save(
+                NotificationEvent.newEvent("evt-dup", EventType.CREDIT_TRANSFER, 1, null, "{}", null));
 
-        List<NotificationEvent> claimed = notificationEventRepository.claimRetryEligible(100);
+        assertThatThrownBy(() -> notificationEventRepository.save(
+                        NotificationEvent.newEvent("evt-dup", EventType.CREDIT_TRANSFER, 1, null, "{}", null)))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void shouldClaimPendingAndDueRetryEventsOldestFirst() throws InterruptedException {
+        NotificationEvent pending =
+                notificationEventRepository.save(NotificationEvent.newEvent("evt-p", EventType.CREDIT_TRANSFER, 1, null, "{}", null));
+        NotificationEvent oldestRetryable = persistDueRetryScheduledEvent("evt-r1");
+        NotificationEvent newestRetryable = persistDueRetryScheduledEvent("evt-r2");
+        // A retry whose next attempt time has not arrived yet must not be claimed.
+        NotificationEvent notYetDueRetryable = persistFutureRetryScheduledEvent("evt-r3");
+
+        List<NotificationEvent> claimed = claimOutsideOfRepositoryTransaction();
 
         List<Long> claimedIds = claimed.stream().map(NotificationEvent::getId).toList();
-        assertThat(claimedIds).contains(oldestRetryable.getId(), newestRetryable.getId());
-        assertThat(claimedIds).doesNotContain(pending.getId());
+        assertThat(claimedIds).contains(pending.getId(), oldestRetryable.getId(), newestRetryable.getId());
+        assertThat(claimedIds).doesNotContain(notYetDueRetryable.getId());
         assertThat(claimedIds.indexOf(oldestRetryable.getId()))
                 .isLessThan(claimedIds.indexOf(newestRetryable.getId()));
 
@@ -78,27 +96,46 @@ class NotificationEventPersistenceIntTest {
                 "SELECT status FROM notification_event WHERE id = ?",
                 String.class,
                 oldestRetryable.getId());
+        // The claim transaction committed without a state change, so the row
+        // is still RETRY_SCHEDULED; claiming only locks rows, it does not
+        // transition state by itself.
         assertThat(storedStatus).isEqualTo("RETRY_SCHEDULED");
     }
 
     @Test
-    void shouldRespectClaimLimit() throws InterruptedException {
-        persistRetryScheduledEvent();
-        persistRetryScheduledEvent();
-        persistRetryScheduledEvent();
+    void shouldClaimStaleDeliveringEventsForRecovery() {
+        NotificationEvent stale = notificationEventRepository.save(
+                NotificationEvent.newEvent("evt-stale", EventType.CREDIT_CARD_PAYMENT, 1, null, "{}", null));
+        stale.markDelivering();
+        notificationEventRepository.save(stale);
 
-        List<NotificationEvent> claimed = notificationEventRepository.claimRetryEligible(2);
+        // Simulates a crashed delivery: the event has been DELIVERING for
+        // longer than the lease allows.
+        jdbcTemplate.update(
+                "UPDATE notification_event SET updated_at = now() - interval '1 hour' WHERE id = ?",
+                stale.getId());
+
+        List<NotificationEvent> claimed = claimOutsideOfRepositoryTransaction();
+
+        assertThat(claimed).extracting(NotificationEvent::getId).contains(stale.getId());
+    }
+
+    @Test
+    void shouldRespectClaimLimit() throws InterruptedException {
+        persistDueRetryScheduledEvent("evt-l1");
+        persistDueRetryScheduledEvent("evt-l2");
+        persistDueRetryScheduledEvent("evt-l3");
+
+        List<NotificationEvent> claimed = new TransactionTemplate(transactionManager).execute(status ->
+                notificationEventRepository.claimDeliverable(2, Instant.now(), staleThreshold()));
 
         assertThat(claimed).hasSize(2);
-        assertThat(claimed)
-                .allSatisfy(event -> assertThat(event.getStatus())
-                        .isEqualTo(NotificationEventStatus.RETRY_SCHEDULED));
     }
 
     @Test
     void shouldNotClaimEventsLockedByAnotherWorker() throws Exception {
-        persistRetryScheduledEvent();
-        persistRetryScheduledEvent();
+        persistDueRetryScheduledEvent("evt-c1");
+        persistDueRetryScheduledEvent("evt-c2");
 
         TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
         ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -107,7 +144,8 @@ class NotificationEventPersistenceIntTest {
             CountDownLatch releaseFirstClaim = new CountDownLatch(1);
 
             Future<?> firstWorker = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
-                List<NotificationEvent> claimed = notificationEventRepository.claimRetryEligible(100);
+                List<NotificationEvent> claimed =
+                        notificationEventRepository.claimDeliverable(100, Instant.now(), staleThreshold());
                 assertThat(claimed).isNotEmpty();
                 firstClaimDone.countDown();
                 await(releaseFirstClaim);
@@ -118,8 +156,9 @@ class NotificationEventPersistenceIntTest {
             Future<?> secondWorker = executor.submit(() -> transactionTemplate.executeWithoutResult(
                     status -> {
                         // The first worker still holds the row locks, so all
-                        // retry-eligible rows are skipped and nothing is claimed.
-                        List<NotificationEvent> claimed = notificationEventRepository.claimRetryEligible(100);
+                        // claimable rows are skipped and nothing is claimed.
+                        List<NotificationEvent> claimed =
+                                notificationEventRepository.claimDeliverable(100, Instant.now(), staleThreshold());
                         assertThat(claimed).isEmpty();
                     }));
 
@@ -133,8 +172,8 @@ class NotificationEventPersistenceIntTest {
 
     @Test
     void shouldRejectConcurrentModificationsViaOptimisticLocking() {
-        NotificationEvent saved =
-                notificationEventRepository.save(NotificationEvent.newEvent(EventType.CASH_WITHDRAWAL, "{}"));
+        NotificationEvent saved = notificationEventRepository.save(
+                NotificationEvent.newEvent("evt-ol", EventType.CASH_WITHDRAWAL, 1, null, "{}", null));
 
         NotificationEvent firstLoad = notificationEventRepository.findById(saved.getId()).orElseThrow();
         NotificationEvent secondLoad = notificationEventRepository.findById(saved.getId()).orElseThrow();
@@ -147,15 +186,38 @@ class NotificationEventPersistenceIntTest {
                 .isInstanceOf(OptimisticLockingFailureException.class);
     }
 
-    private NotificationEvent persistRetryScheduledEvent() throws InterruptedException {
-        NotificationEvent event = NotificationEvent.newEvent(EventType.CREDIT_CARD_PAYMENT, "{}");
+    /**
+     * The claim operation holds row locks until the surrounding transaction
+     * commits, so tests that inspect claimed rows afterwards must run the
+     * claim in its own committed transaction.
+     */
+    private List<NotificationEvent> claimOutsideOfRepositoryTransaction() {
+        return new TransactionTemplate(transactionManager).execute(status ->
+                notificationEventRepository.claimDeliverable(100, Instant.now(), staleThreshold()));
+    }
+
+    private static Instant staleThreshold() {
+        return Instant.now().minusSeconds(300);
+    }
+
+    private NotificationEvent persistDueRetryScheduledEvent(String eventId) throws InterruptedException {
+        NotificationEvent event =
+                NotificationEvent.newEvent(eventId, EventType.CREDIT_CARD_PAYMENT, 1, null, "{}", null);
         event.markDelivering();
-        event.scheduleRetry();
+        event.scheduleRetry(Instant.now().minusSeconds(60));
         NotificationEvent saved = notificationEventRepository.save(event);
         // Guarantees a strictly greater created_at for the next event so that
         // "oldest first" ordering is deterministic.
         Thread.sleep(50);
         return saved;
+    }
+
+    private NotificationEvent persistFutureRetryScheduledEvent(String eventId) {
+        NotificationEvent event =
+                NotificationEvent.newEvent(eventId, EventType.CREDIT_CARD_PAYMENT, 1, null, "{}", null);
+        event.markDelivering();
+        event.scheduleRetry(Instant.now().plusSeconds(3600));
+        return notificationEventRepository.save(event);
     }
 
     private static void await(CountDownLatch latch) {

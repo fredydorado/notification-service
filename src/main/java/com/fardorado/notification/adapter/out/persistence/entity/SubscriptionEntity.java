@@ -19,7 +19,6 @@ import org.hibernate.annotations.UpdateTimestamp;
 
 import com.fardorado.notification.adapter.out.persistence.converter.EventTypeConverter;
 import com.fardorado.notification.domain.model.notification.EventType;
-import com.fardorado.notification.domain.model.notification.NotificationChannel;
 import com.fardorado.notification.domain.model.subscription.SubscriptionStatus;
 
 import lombok.AllArgsConstructor;
@@ -43,23 +42,19 @@ public class SubscriptionEntity {
     @Column(name = "id")
     private Long id;
 
-    @Column(name = "subscriber_id", nullable = false, length = 100)
-    private String subscriberId;
+    @Column(name = "client_id", nullable = false, length = 100)
+    private String clientId;
 
     @Convert(converter = EventTypeConverter.class)
     @Column(name = "event_type", nullable = false, length = 50)
     private EventType eventType;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "channel", nullable = false, length = 20)
-    private NotificationChannel channel;
-
-    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)
     private SubscriptionStatus status;
 
-    @Column(name = "endpoint", nullable = false, length = 1000)
-    private String endpoint;
+    @Column(name = "webhook_url", nullable = false, columnDefinition = "text")
+    private String webhookUrl;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false)

@@ -4,19 +4,19 @@ import java.util.Objects;
 
 import com.fardorado.notification.domain.exception.InvalidStatusTransitionException;
 import com.fardorado.notification.domain.model.notification.EventType;
-import com.fardorado.notification.domain.model.notification.NotificationChannel;
 
 /**
- * A customer's subscription to a particular event type through a
- * notification channel.
+ * A customer's subscription to a particular notification event type.
+ *
+ * <p>The only delivery channel is WEBHOOK, so the channel is not modeled
+ * explicitly: the {@code webhookUrl} is the delivery target.</p>
  */
 public class Subscription {
 
     private final Long id;
-    private final String subscriberId;
+    private final String clientId;
     private final EventType eventType;
-    private final NotificationChannel channel;
-    private final String endpoint;
+    private final String webhookUrl;
     /**
      * Opaque concurrency token managed by the persistence layer. The domain
      * never modifies it; it is carried so that stale updates can be detected
@@ -30,11 +30,10 @@ public class Subscription {
      * {@link SubscriptionStatus#ACTIVE}.
      */
     public static Subscription newSubscription(
-            String subscriberId,
+            String clientId,
             EventType eventType,
-            NotificationChannel channel,
-            String endpoint) {
-        return new Subscription(null, subscriberId, eventType, channel, SubscriptionStatus.ACTIVE, endpoint, null);
+            String webhookUrl) {
+        return new Subscription(null, clientId, eventType, SubscriptionStatus.ACTIVE, webhookUrl, null);
     }
 
     /**
@@ -42,18 +41,16 @@ public class Subscription {
      */
     public Subscription(
             Long id,
-            String subscriberId,
+            String clientId,
             EventType eventType,
-            NotificationChannel channel,
             SubscriptionStatus status,
-            String endpoint,
+            String webhookUrl,
             Long version) {
         this.id = id;
-        this.subscriberId = Objects.requireNonNull(subscriberId, "subscriberId must not be null");
+        this.clientId = Objects.requireNonNull(clientId, "clientId must not be null");
         this.eventType = Objects.requireNonNull(eventType, "eventType must not be null");
-        this.channel = Objects.requireNonNull(channel, "channel must not be null");
         this.status = Objects.requireNonNull(status, "status must not be null");
-        this.endpoint = Objects.requireNonNull(endpoint, "endpoint must not be null");
+        this.webhookUrl = Objects.requireNonNull(webhookUrl, "webhookUrl must not be null");
         this.version = version;
     }
 
@@ -86,24 +83,20 @@ public class Subscription {
         return id;
     }
 
-    public String getSubscriberId() {
-        return subscriberId;
+    public String getClientId() {
+        return clientId;
     }
 
     public EventType getEventType() {
         return eventType;
     }
 
-    public NotificationChannel getChannel() {
-        return channel;
+    public String getWebhookUrl() {
+        return webhookUrl;
     }
 
     public SubscriptionStatus getStatus() {
         return status;
-    }
-
-    public String getEndpoint() {
-        return endpoint;
     }
 
     public Long getVersion() {

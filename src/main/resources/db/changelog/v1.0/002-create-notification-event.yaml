@@ -19,10 +19,26 @@ databaseChangeLog:
                     primaryKeyName: pk_notification_event
                     nullable: false
               - column:
+                  name: event_id
+                  type: varchar(100)
+                  constraints:
+                    nullable: false
+              - column:
                   name: event_type
                   type: varchar(50)
                   constraints:
                     nullable: false
+              - column:
+                  name: event_version
+                  type: integer
+                  defaultValueNumeric: 1
+                  constraints:
+                    nullable: false
+              - column:
+                  name: correlation_id
+                  type: varchar(100)
+                  constraints:
+                    nullable: true
               - column:
                   name: status
                   type: varchar(30)
@@ -33,6 +49,16 @@ databaseChangeLog:
                   type: jsonb
                   constraints:
                     nullable: false
+              - column:
+                  name: subscription_id
+                  type: bigint
+                  constraints:
+                    nullable: true
+              - column:
+                  name: next_attempt_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: true
               - column:
                   name: created_at
                   type: timestamp with time zone
@@ -49,6 +75,17 @@ databaseChangeLog:
                   defaultValueNumeric: 0
                   constraints:
                     nullable: false
+        - addUniqueConstraint:
+            tableName: notification_event
+            constraintName: uq_notification_event_event_id
+            columnNames: event_id
+        - addForeignKeyConstraint:
+            baseTableName: notification_event
+            baseColumnNames: subscription_id
+            referencedTableName: subscription
+            referencedColumnNames: id
+            constraintName: fk_notification_event_subscription
+            onDelete: RESTRICT
         - createIndex:
             tableName: notification_event
             indexName: idx_notification_event_status_created_at
@@ -60,11 +97,31 @@ databaseChangeLog:
         - sql:
             dbms: postgresql
             splitStatements: false
-            sql: "COMMENT ON COLUMN notification_event.event_type IS 'Possible values: credit_card_payment, cash_withdrawal, credit_transfer. Must correspond to the EventType Java enum.'"
+            sql: "COMMENT ON COLUMN notification_event.event_id IS 'The canonical identity of the source event; used as the notification_event identity to enforce idempotent ingestion (event_id == notification_event_id).'"
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            sql: "COMMENT ON COLUMN notification_event.event_type IS 'The business event type. Values correspond to the EventType Java enum.'"
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            sql: "COMMENT ON COLUMN notification_event.event_version IS 'The version of the event contract/schema; NOT the optimistic-lock version column.'"
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            sql: "COMMENT ON COLUMN notification_event.correlation_id IS 'Correlation identifier propagated from the source event for logging and tracing.'"
         - sql:
             dbms: postgresql
             splitStatements: false
             sql: "COMMENT ON COLUMN notification_event.status IS 'Possible values: PENDING, DELIVERING, RETRY_SCHEDULED, COMPLETED, FAILED. Must correspond to the NotificationEventStatus Java enum.'"
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            sql: "COMMENT ON COLUMN notification_event.subscription_id IS 'The subscription matched for (client_id, event_type); NULL when no active subscription matched (event is then FAILED).'"
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            sql: "COMMENT ON COLUMN notification_event.next_attempt_at IS 'Earliest time the next delivery attempt may run while the event is RETRY_SCHEDULED.'"
       rollback:
         - dropTable:
             tableName: notification_event

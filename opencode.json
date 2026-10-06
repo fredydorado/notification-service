@@ -6,11 +6,11 @@
   "agent": {
     "build": {
       "mode": "primary",
-      "model": "opencode-go/glm-5.3"
+      "model": "opencode-go/glm-5.2"
     },
     "plan": {
       "mode": "primary",
-      "model": "opencode-go/glm-5.3"
+      "model": "opencode-go/glm-5.2"
     }
   }
 }

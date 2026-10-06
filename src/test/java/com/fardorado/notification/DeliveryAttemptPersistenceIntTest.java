@@ -20,11 +20,10 @@ import com.fardorado.notification.application.port.out.NotificationEventReposito
 import com.fardorado.notification.domain.model.delivery.DeliveryAttempt;
 import com.fardorado.notification.domain.model.delivery.DeliveryAttemptStatus;
 import com.fardorado.notification.domain.model.notification.EventType;
-import com.fardorado.notification.domain.model.notification.NotificationChannel;
 import com.fardorado.notification.domain.model.notification.NotificationEvent;
 
 @Import(TestcontainersConfiguration.class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "notification.processing.dispatch-enabled=false")
 class DeliveryAttemptPersistenceIntTest {
 
     @Autowired
@@ -38,12 +37,12 @@ class DeliveryAttemptPersistenceIntTest {
 
     @Test
     void shouldSaveAttemptAndFindHistoryOrderedByAttemptNumber() {
-        Long notificationEventId = persistNotificationEvent();
+        Long notificationEventId = persistNotificationEvent("evt-a1");
 
-        DeliveryAttempt first = deliveryAttemptRepository.save(
-                DeliveryAttempt.startAttempt(notificationEventId, NotificationChannel.WEBHOOK, 1));
-        DeliveryAttempt second = deliveryAttemptRepository.save(
-                DeliveryAttempt.startAttempt(notificationEventId, NotificationChannel.WEBHOOK, 2));
+        DeliveryAttempt first =
+                deliveryAttemptRepository.save(DeliveryAttempt.startAttempt(notificationEventId, 1));
+        DeliveryAttempt second =
+                deliveryAttemptRepository.save(DeliveryAttempt.startAttempt(notificationEventId, 2));
 
         assertThat(first.getId()).isNotNull();
         assertThat(first.getVersion()).isEqualTo(0);
@@ -61,10 +60,10 @@ class DeliveryAttemptPersistenceIntTest {
 
     @Test
     void shouldCompleteAttemptLifecycle() {
-        Long notificationEventId = persistNotificationEvent();
+        Long notificationEventId = persistNotificationEvent("evt-a2");
 
-        DeliveryAttempt saved = deliveryAttemptRepository.save(
-                DeliveryAttempt.startAttempt(notificationEventId, NotificationChannel.WEBHOOK, 1));
+        DeliveryAttempt saved =
+                deliveryAttemptRepository.save(DeliveryAttempt.startAttempt(notificationEventId, 1));
 
         DeliveryAttempt loaded = deliveryAttemptRepository
                 .findByNotificationEventIdOrderByAttemptNumber(saved.getNotificationEventId())
@@ -81,27 +80,52 @@ class DeliveryAttemptPersistenceIntTest {
     }
 
     @Test
-    void shouldRejectDuplicateAttemptNumberPerNotificationEvent() {
-        Long notificationEventId = persistNotificationEvent();
+    void shouldProvideNextAttemptNumber() {
+        Long notificationEventId = persistNotificationEvent("evt-a3");
 
-        deliveryAttemptRepository.save(DeliveryAttempt.startAttempt(notificationEventId, NotificationChannel.WEBHOOK, 1));
+        assertThat(deliveryAttemptRepository.nextAttemptNumber(notificationEventId)).isEqualTo(1);
+
+        deliveryAttemptRepository.save(DeliveryAttempt.startAttempt(notificationEventId, 1));
+        deliveryAttemptRepository.save(DeliveryAttempt.startAttempt(notificationEventId, 2));
+
+        assertThat(deliveryAttemptRepository.nextAttemptNumber(notificationEventId)).isEqualTo(3);
+    }
+
+    @Test
+    void shouldFindAttemptsByStatus() {
+        Long notificationEventId = persistNotificationEvent("evt-a4");
+
+        DeliveryAttempt inProgress =
+                deliveryAttemptRepository.save(DeliveryAttempt.startAttempt(notificationEventId, 1));
+
+        List<DeliveryAttempt> found = deliveryAttemptRepository
+                .findByNotificationEventIdAndStatus(notificationEventId, DeliveryAttemptStatus.IN_PROGRESS);
+
+        assertThat(found).extracting(DeliveryAttempt::getId).containsExactly(inProgress.getId());
+    }
+
+    @Test
+    void shouldRejectDuplicateAttemptNumberPerNotificationEvent() {
+        Long notificationEventId = persistNotificationEvent("evt-a5");
+
+        deliveryAttemptRepository.save(DeliveryAttempt.startAttempt(notificationEventId, 1));
 
         assertThatThrownBy(() -> deliveryAttemptRepository.save(
-                        DeliveryAttempt.startAttempt(notificationEventId, NotificationChannel.WEBHOOK, 1)))
+                        DeliveryAttempt.startAttempt(notificationEventId, 1)))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
     void shouldEnforceDatabaseCheckConstraintOnAttemptNumber() {
-        Long notificationEventId = persistNotificationEvent();
+        Long notificationEventId = persistNotificationEvent("evt-a6");
 
         // Bypasses the domain guard to verify the database constraint itself.
         assertThatThrownBy(() -> jdbcTemplate.update(
                         """
                         INSERT INTO delivery_attempt
-                            (notification_event_id, channel, status, attempt_number, created_at, version)
+                            (notification_event_id, status, attempt_number, created_at, version)
                         VALUES
-                            (?, 'WEBHOOK', 'IN_PROGRESS', 0, now(), 0)
+                            (?, 'IN_PROGRESS', 0, now(), 0)
                         """,
                         notificationEventId))
                 .isInstanceOf(DataAccessException.class);
@@ -109,19 +133,18 @@ class DeliveryAttemptPersistenceIntTest {
 
     @Test
     void shouldEnforceDomainGuardOnAttemptNumber() {
-        Long notificationEventId = persistNotificationEvent();
+        Long notificationEventId = persistNotificationEvent("evt-a7");
 
-        assertThatThrownBy(() ->
-                        DeliveryAttempt.startAttempt(notificationEventId, NotificationChannel.WEBHOOK, 0))
+        assertThatThrownBy(() -> DeliveryAttempt.startAttempt(notificationEventId, 0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("attemptNumber");
     }
 
     @Test
     void shouldNotDeleteNotificationEventWithAttempts() {
-        Long notificationEventId = persistNotificationEvent();
+        Long notificationEventId = persistNotificationEvent("evt-a8");
 
-        deliveryAttemptRepository.save(DeliveryAttempt.startAttempt(notificationEventId, NotificationChannel.WEBHOOK, 1));
+        deliveryAttemptRepository.save(DeliveryAttempt.startAttempt(notificationEventId, 1));
 
         assertThatThrownBy(() -> jdbcTemplate.update(
                         "DELETE FROM notification_event WHERE id = ?", notificationEventId))
@@ -130,10 +153,10 @@ class DeliveryAttemptPersistenceIntTest {
 
     @Test
     void shouldRejectConcurrentModificationsViaOptimisticLocking() {
-        Long notificationEventId = persistNotificationEvent();
+        Long notificationEventId = persistNotificationEvent("evt-a9");
 
-        DeliveryAttempt saved = deliveryAttemptRepository.save(
-                DeliveryAttempt.startAttempt(notificationEventId, NotificationChannel.WEBHOOK, 1));
+        DeliveryAttempt saved =
+                deliveryAttemptRepository.save(DeliveryAttempt.startAttempt(notificationEventId, 1));
 
         DeliveryAttempt firstLoad = deliveryAttemptRepository
                 .findByNotificationEventIdOrderByAttemptNumber(saved.getNotificationEventId())
@@ -150,9 +173,10 @@ class DeliveryAttemptPersistenceIntTest {
                 .isInstanceOf(OptimisticLockingFailureException.class);
     }
 
-    private Long persistNotificationEvent() {
+    private Long persistNotificationEvent(String eventId) {
         NotificationEvent saved = notificationEventRepository.save(
-                NotificationEvent.newEvent(EventType.CREDIT_CARD_PAYMENT, "{\"card_last_four\": \"1234\"}"));
+                NotificationEvent.newEvent(eventId, EventType.CREDIT_CARD_PAYMENT, 1, null,
+                        "{\"card_last_four\": \"1234\"}", null));
         return saved.getId();
     }
 }

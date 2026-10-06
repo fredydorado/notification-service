@@ -4,19 +4,19 @@ import java.time.Instant;
 import java.util.Objects;
 
 import com.fardorado.notification.domain.exception.InvalidStatusTransitionException;
-import com.fardorado.notification.domain.model.notification.NotificationChannel;
 
 /**
  * A single attempt to deliver a notification event.
  *
  * <p>Retries are represented as additional delivery attempts for the same
- * notification event, each with the next {@code attemptNumber}.</p>
+ * notification event, each with the next {@code attemptNumber}. Previous
+ * attempts are never overwritten (append-only history). The only delivery
+ * channel is WEBHOOK, so the channel is not modeled explicitly.</p>
  */
 public class DeliveryAttempt {
 
     private final Long id;
     private final Long notificationEventId;
-    private final NotificationChannel channel;
     private final int attemptNumber;
     private String errorMessage;
     private Instant completedAt;
@@ -34,10 +34,9 @@ public class DeliveryAttempt {
      */
     public static DeliveryAttempt startAttempt(
             Long notificationEventId,
-            NotificationChannel channel,
             int attemptNumber) {
         return new DeliveryAttempt(
-                null, notificationEventId, channel, DeliveryAttemptStatus.IN_PROGRESS, attemptNumber, null, null, null);
+                null, notificationEventId, DeliveryAttemptStatus.IN_PROGRESS, attemptNumber, null, null, null);
     }
 
     /**
@@ -46,7 +45,6 @@ public class DeliveryAttempt {
     public DeliveryAttempt(
             Long id,
             Long notificationEventId,
-            NotificationChannel channel,
             DeliveryAttemptStatus status,
             int attemptNumber,
             String errorMessage,
@@ -55,7 +53,6 @@ public class DeliveryAttempt {
         this.id = id;
         this.notificationEventId = Objects.requireNonNull(notificationEventId,
                 "notificationEventId must not be null");
-        this.channel = Objects.requireNonNull(channel, "channel must not be null");
         this.status = Objects.requireNonNull(status, "status must not be null");
         if (attemptNumber < 1) {
             throw new IllegalArgumentException("attemptNumber must be greater than zero");
@@ -103,10 +100,6 @@ public class DeliveryAttempt {
 
     public Long getNotificationEventId() {
         return notificationEventId;
-    }
-
-    public NotificationChannel getChannel() {
-        return channel;
     }
 
     public DeliveryAttemptStatus getStatus() {

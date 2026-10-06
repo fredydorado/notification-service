@@ -24,11 +24,6 @@ databaseChangeLog:
                   constraints:
                     nullable: false
               - column:
-                  name: channel
-                  type: varchar(20)
-                  constraints:
-                    nullable: false
-              - column:
                   name: status
                   type: varchar(30)
                   constraints:
@@ -79,11 +74,11 @@ databaseChangeLog:
         - sql:
             dbms: postgresql
             splitStatements: false
-            sql: "COMMENT ON COLUMN delivery_attempt.channel IS 'Possible values: WEBHOOK. Must correspond to the NotificationChannel Java enum.'"
+            sql: "COMMENT ON COLUMN delivery_attempt.status IS 'Possible values: IN_PROGRESS, SUCCESS, FAILED. Must correspond to the DeliveryAttemptStatus Java enum.'"
         - sql:
             dbms: postgresql
             splitStatements: false
-            sql: "COMMENT ON COLUMN delivery_attempt.status IS 'Possible values: IN_PROGRESS, SUCCESS, FAILED. Must correspond to the DeliveryAttemptStatus Java enum.'"
+            sql: "COMMENT ON COLUMN delivery_attempt.notification_event_id IS 'The notification event this delivery attempt belongs to. Retries append new rows; previous attempts are never overwritten. The only delivery channel is WEBHOOK.'"
       rollback:
         - dropTable:
             tableName: delivery_attempt

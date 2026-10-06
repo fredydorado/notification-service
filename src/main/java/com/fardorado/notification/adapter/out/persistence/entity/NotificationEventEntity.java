@@ -44,9 +44,18 @@ public class NotificationEventEntity {
     @Column(name = "id")
     private Long id;
 
+    @Column(name = "event_id", nullable = false, length = 100)
+    private String eventId;
+
     @Convert(converter = EventTypeConverter.class)
     @Column(name = "event_type", nullable = false, length = 50)
     private EventType eventType;
+
+    @Column(name = "event_version", nullable = false)
+    private Integer eventVersion;
+
+    @Column(name = "correlation_id", length = 100)
+    private String correlationId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)
@@ -55,6 +64,12 @@ public class NotificationEventEntity {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "payload", nullable = false, columnDefinition = "jsonb")
     private String payload;
+
+    @Column(name = "subscription_id")
+    private Long subscriptionId;
+
+    @Column(name = "next_attempt_at")
+    private Instant nextAttemptAt;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false)

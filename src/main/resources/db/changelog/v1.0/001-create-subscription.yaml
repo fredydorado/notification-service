@@ -19,7 +19,7 @@ databaseChangeLog:
                     primaryKeyName: pk_subscription
                     nullable: false
               - column:
-                  name: subscriber_id
+                  name: client_id
                   type: varchar(100)
                   constraints:
                     nullable: false
@@ -29,18 +29,13 @@ databaseChangeLog:
                   constraints:
                     nullable: false
               - column:
-                  name: channel
-                  type: varchar(20)
-                  constraints:
-                    nullable: false
-              - column:
                   name: status
                   type: varchar(30)
                   constraints:
                     nullable: false
               - column:
-                  name: endpoint
-                  type: varchar(1000)
+                  name: webhook_url
+                  type: text
                   constraints:
                     nullable: false
               - column:
@@ -61,30 +56,32 @@ databaseChangeLog:
                     nullable: false
         - addUniqueConstraint:
             tableName: subscription
-            constraintName: uq_subscription_subscriber_event_type_channel
-            columnNames: subscriber_id, event_type, channel
+            constraintName: uq_subscription_client_event_type
+            columnNames: client_id, event_type
         - createIndex:
             tableName: subscription
-            indexName: idx_subscription_event_type_channel_status
+            indexName: idx_subscription_event_type_status
             columns:
               - column:
                   name: event_type
-              - column:
-                  name: channel
               - column:
                   name: status
         - sql:
             dbms: postgresql
             splitStatements: false
-            sql: "COMMENT ON COLUMN subscription.event_type IS 'Possible values: credit_card_payment, cash_withdrawal, credit_transfer. Must correspond to the EventType Java enum.'"
+            sql: "COMMENT ON COLUMN subscription.client_id IS 'The logical identifier of the client this subscription belongs to.'"
         - sql:
             dbms: postgresql
             splitStatements: false
-            sql: "COMMENT ON COLUMN subscription.channel IS 'Possible values: WEBHOOK. Must correspond to the NotificationChannel Java enum.'"
+            sql: "COMMENT ON COLUMN subscription.event_type IS 'The business event type the client wants to be notified about. Values correspond to the EventType Java enum.'"
         - sql:
             dbms: postgresql
             splitStatements: false
             sql: "COMMENT ON COLUMN subscription.status IS 'Possible values: ACTIVE, INACTIVE. Must correspond to the SubscriptionStatus Java enum.'"
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            sql: "COMMENT ON COLUMN subscription.webhook_url IS 'The webhook URL the notification payload is POSTed to. The only delivery channel is WEBHOOK.'"
       rollback:
         - dropTable:
             tableName: subscription

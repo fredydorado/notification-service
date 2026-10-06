@@ -9,7 +9,6 @@ import com.fardorado.notification.adapter.out.persistence.entity.SubscriptionEnt
 import com.fardorado.notification.adapter.out.persistence.mapper.SubscriptionPersistenceMapper;
 import com.fardorado.notification.application.port.out.SubscriptionRepository;
 import com.fardorado.notification.domain.model.notification.EventType;
-import com.fardorado.notification.domain.model.notification.NotificationChannel;
 import com.fardorado.notification.domain.model.subscription.Subscription;
 import com.fardorado.notification.domain.model.subscription.SubscriptionStatus;
 
@@ -37,11 +36,11 @@ public class SubscriptionRepositoryImpl implements SubscriptionRepository {
     }
 
     @Override
-    public List<Subscription> findByEventTypeAndChannelAndStatus(
+    public List<Subscription> findByClientIdAndEventTypeAndStatus(
+            String clientId,
             EventType eventType,
-            NotificationChannel channel,
             SubscriptionStatus status) {
-        return jpaRepository.findByEventTypeAndChannelAndStatus(eventType, channel, status).stream()
+        return jpaRepository.findByClientIdAndEventTypeAndStatus(clientId, eventType, status).stream()
                 .map(mapper::toDomain)
                 .toList();
     }

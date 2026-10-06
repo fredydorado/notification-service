@@ -7,3 +7,25 @@ spring:
     open-in-view: false
   liquibase:
     change-log: classpath:db/changelog/db.changelog-master.yaml
+  kafka:
+    consumer:
+      group-id: notification-service
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    listener:
+      ack-mode: manual_immediate
+
+notification:
+  kafka:
+    topic: notification-events
+  processing:
+    dispatch-enabled: true
+    poll-interval: 5s
+    max-attempts: 5
+    backoff-initial: 30s
+    backoff-max: 10m
+    lease-timeout: 5m
+    claim-batch-size: 50
+    worker-pool-size: 10
