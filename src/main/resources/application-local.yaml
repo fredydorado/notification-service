@@ -1,0 +1,16 @@
+# Local deployment: connects to the PostgreSQL and Kafka started by the
+# docker-compose.yml in the repository root.
+#
+#   docker compose up -d --wait
+#   mvn spring-boot:run -Dspring-boot.run.profiles=local
+#
+# Only connection settings live here; everything else comes from application.yaml.
+spring:
+  datasource:
+    # 5433, not 5432: the compose file publishes PostgreSQL there so it does not
+    # collide with a PostgreSQL installed on the host.
+    url: jdbc:postgresql://localhost:5433/notification_service
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+  kafka:
+    bootstrap-servers: localhost:9092

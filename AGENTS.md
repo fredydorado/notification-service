@@ -5,7 +5,7 @@ Single-module Spring Boot 4.1.1 / Java 21 / Maven service (`com.fardorado.notifi
 ## Commands
 
 - No Maven wrapper (`mvnw` absent) — use the system `mvn`.
-- Run app: `mvn spring-boot:run`
+- Run app locally: `docker compose up -d --wait` (Kafka on 9092 + PostgreSQL on **5433**, from `docker-compose.yml`), then `mvn spring-boot:run -Dspring-boot.run.profiles=local` (`application-local.yaml`). A bare `mvn spring-boot:run` has no datasource and cannot start. On this Windows machine add `-Dspring-boot.run.jvmArguments=-Djdk.net.unixdomain.tmpdir=target` (the pom workaround only covers Surefire). Stop with `docker compose down` (`-v` wipes the DB). Details in README "Run locally".
 - All tests: `mvn test` — requires a reachable Docker daemon (Testcontainers). On Windows where Docker lives inside WSL2, use `.\scripts\run-tests.ps1` (or `./scripts/run-tests.sh`) instead; it passes every argument through to Maven.
 - Single test class: `mvn test -Dtest=NotificationServiceApplicationTests`
 - Single method: `mvn test -Dtest=NotificationServiceApplicationTests#contextLoads`

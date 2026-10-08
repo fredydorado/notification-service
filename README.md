@@ -48,7 +48,7 @@ So this file was used to test this specific scenario in KafkaNotificationConsume
 |---|---|
 | JDK | 21 |
 | Maven | 3.9+ (no wrapper — use the system `mvn`) |
-| Docker | required for `mvn test` only (Testcontainers) |
+| Docker | required for `mvn test` (Testcontainers) and to [run the service locally](#run-locally) (Docker Compose) |
 
 ---
 
@@ -58,15 +58,151 @@ So this file was used to test this specific scenario in KafkaNotificationConsume
 mvn package
 ```
 
+The service needs a PostgreSQL and a Kafka broker. For local work, follow
+[Run locally](#run-locally): one command starts both in Docker and a Spring profile
+points the service at them. Once the service is up, the interactive API documentation
+is at <http://localhost:8080/swagger-ui.html>.
+
+Liquibase owns the schema and `spring.jpa.hibernate.ddl-auto` is `validate`, so
+Hibernate never creates tables.
+
+---
+
+## Run locally
+
+[`docker-compose.yml`](docker-compose.yml) starts the infrastructure and the `local`
+Spring profile ([`application-local.yaml`](src/main/resources/application-local.yaml))
+points the service at it. Besides JDK 21 and Maven, the only thing you need is Docker
+with Compose v2 — no PostgreSQL or Kafka has to be installed on the machine.
+
+| Service | Image | Host port | Connection |
+|---|---|---|---|
+| Kafka | `apache/kafka:latest` — default single-node KRaft configuration | `9092` | `localhost:9092`, plaintext |
+| PostgreSQL | `postgres:17` | **`5433`** (container port 5432) | database `notification_service`, user `postgres`, password `postgres` |
+
+PostgreSQL is published on **5433**, not 5432, so it does not collide with a PostgreSQL
+already installed on the host.
+
+### 1. Start Kafka and PostgreSQL
+
 ```bash
-mvn spring-boot:run
+docker compose up -d --wait
 ```
 
-Once it is up, the interactive API documentation is at
-<http://localhost:8080/swagger-ui.html>.
+`--wait` returns once both healthchecks pass. The first run pulls the images. There is
+no topic to create: the broker auto-creates `notification-events` the first time the
+service or a producer touches it (so one "recoverable issue" metadata warning from the
+Kafka client at the very first start is expected).
 
-The app expects a reachable PostgreSQL and Kafka; Liquibase owns the schema and
-`spring.jpa.hibernate.ddl-auto` is `validate`, so Hibernate never creates tables.
+### 2. Start the service with the `local` profile
+
+```bash
+mvn spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+PowerShell needs the argument quoted:
+
+```powershell
+mvn spring-boot:run "-Dspring-boot.run.profiles=local"
+```
+
+Setting `SPRING_PROFILES_ACTIVE=local` works as well. Liquibase creates the three tables
+on the first start. Check that everything is connected:
+
+```bash
+curl -s http://localhost:8080/actuator/health
+```
+
+The `db` component is a real probe against the PostgreSQL container, and the Kafka
+consumer logs `partitions assigned: [notification-events-0]`.
+
+> **Windows with the `%TEMP%` problem.** If startup fails with
+> `Unable to establish loopback connection` (see
+> [Why the pom has a `windows-unixdomain-tmpdir` profile](#why-the-pom-has-a-windows-unixdomain-tmpdir-profile)),
+> the forked JVM needs the same workaround the test run gets from the pom. The pom
+> profile only configures Surefire, so pass it explicitly:
+>
+> ```powershell
+> mvn spring-boot:run "-Dspring-boot.run.profiles=local" "-Dspring-boot.run.jvmArguments=-Djdk.net.unixdomain.tmpdir=target"
+> ```
+
+> **Docker inside WSL2 instead of Docker Desktop.** Run Compose inside the distro (and keep
+> the distro awake, as described under [Running the tests](#running-the-tests)), for
+> example `wsl -d Ubuntu -- docker compose up -d --wait` from this directory. Windows reaches
+> the published ports through WSL's `localhost` forwarding.
+
+### 3. Try it end to end
+
+A client only receives notifications it is subscribed to, so create a subscription first;
+an event with no matching subscription is stored as `FAILED` with no owner and is not
+visible through the API. The `event_type` is stored in its wire form (lowercase, as it
+appears in Kafka messages).
+
+**a. A webhook to deliver to.** Use any endpoint that answers `2xx`. A throwaway receiver
+(save as `webhook_receiver.py`, run `python webhook_receiver.py`):
+
+```python
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        print("received:", body.decode(), flush=True)
+        self.send_response(200)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+HTTPServer(("", 9100), Handler).serve_forever()
+```
+
+**b. A subscription for `CLIENT001`:**
+
+```bash
+docker exec notification-postgres psql -U postgres -d notification_service -c "INSERT INTO subscription (client_id, event_type, status, webhook_url, created_at, updated_at) VALUES ('CLIENT001', 'credit_card_payment', 'ACTIVE', 'http://localhost:9100/webhook', now(), now());"
+```
+
+**c. Publish an event** (one JSON document per line — the sample file
+`src/test/resources/sample/notification_events.json` wraps many events in an `events`
+array, so publish them one at a time). In Git Bash on Windows, prefix the command with
+`MSYS_NO_PATHCONV=1`, otherwise `/opt/kafka/...` is rewritten into a Windows path.
+
+```bash
+echo '{"event_id":"EVT001","event_type":"credit_card_payment","content":"Credit card payment received for $150.00","client_id":"CLIENT001"}' | docker exec -i notification-kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic notification-events
+```
+
+**d. Follow it through the API:**
+
+```bash
+curl -s -H 'X-Client-Id: CLIENT001' http://localhost:8080/notification_events/EVT001
+```
+
+Within a few seconds the status is `COMPLETED` with one `SUCCESS` attempt (`httpStatus` 200)
+and the receiver prints the delivered payload. If the webhook is unreachable, the event
+instead goes through `RETRY_SCHEDULED` with exponential backoff and ends `FAILED` after
+`notification.processing.max-attempts` — which is also the way to try
+`POST /notification_events/EVT001/replay`.
+
+### Credentials, ports and other hosts
+
+- Connect with any PostgreSQL client at `localhost:5433` — for example
+  `docker exec -it notification-postgres psql -U postgres -d notification_service`.
+- `DB_USERNAME` and `DB_PASSWORD` configure **both** the container and the service, so
+  export them before both `docker compose up` and `mvn spring-boot:run`. PostgreSQL reads
+  them only when it initialises an empty data directory, so after changing them on an
+  existing volume run `docker compose down -v` first.
+- To point the service somewhere else, edit `application-local.yaml` or override
+  `SPRING_DATASOURCE_URL` / `SPRING_KAFKA_BOOTSTRAP_SERVERS`.
+
+### Stop and reset
+
+```bash
+docker compose down
+```
+
+keeps the database (it lives in the named volume `notification-postgres-data`); add `-v`
+to delete it and start from an empty schema next time. Kafka data is not persisted.
 
 ---
 
@@ -110,8 +246,7 @@ This is not a problem with the tests. Two things are missing at run time:
 Use the runner script, which handles both and passes everything through to Maven:
 
 ```powershell
-.\scripts
-un-tests.ps1
+.\scripts\run-tests.ps1
 ```
 
 ```bash
@@ -121,13 +256,11 @@ un-tests.ps1
 Any Maven arguments work as usual:
 
 ```powershell
-.\scripts
-un-tests.ps1 test -Dtest=EventProcessingFlowIntTest
+.\scripts\run-tests.ps1 test -Dtest=EventProcessingFlowIntTest
 ```
 
 ```powershell
-.\scripts
-un-tests.ps1 package
+.\scripts\run-tests.ps1 package
 ```
 
 The script holds a WSL session open for exactly the length of the run, starts the
@@ -217,6 +350,9 @@ machine-wide. Linux and CI runs keep the platform default.
 ## Configuration
 
 All values live in [`src/main/resources/application.yaml`](src/main/resources/application.yaml).
+The connection settings for the [local deployment](#run-locally) (PostgreSQL on `localhost:5433`,
+Kafka on `localhost:9092`) are in [`application-local.yaml`](src/main/resources/application-local.yaml),
+which is only active with the `local` profile.
 
 | Property | Default | Meaning |
 |---|---|---|
@@ -432,6 +568,7 @@ All three carry a `version` column for optimistic locking.
 ## Project layout
 
 ```
+docker-compose.yml  Kafka + PostgreSQL for running the service locally
 scripts/         run-tests.ps1 / run-tests.sh - Maven with a reachable Docker daemon
 src/main/java/com/fardorado/notification/
   domain/        model + state machine; no Spring, JPA, Kafka or Jackson

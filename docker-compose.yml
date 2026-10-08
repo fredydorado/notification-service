@@ -1,0 +1,50 @@
+# Local infrastructure for running the service from Maven:
+#
+#   docker compose up -d --wait
+#   mvn spring-boot:run -Dspring-boot.run.profiles=local
+#
+# The `local` Spring profile (src/main/resources/application-local.yaml) points
+# at the ports published below. Not meant for production use.
+
+name: notification-service
+
+services:
+  kafka:
+    # Same image the integration tests start through Testcontainers. Default
+    # configuration: a single-node KRaft broker advertising localhost:9092.
+    image: apache/kafka:latest
+    container_name: notification-kafka
+    ports:
+      - "9092:9092"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  postgres:
+    # Pinned to 17: 18+ moved the data directory, which breaks the
+    # conventional /var/lib/postgresql/data volume mount below.
+    image: postgres:17
+    container_name: notification-postgres
+    ports:
+      # Host port 5433, because 5432 is commonly taken by a local PostgreSQL.
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: notification_service
+      # Same variables the `local` profile reads, so one export configures both.
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - notification-postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d notification_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  notification-postgres-data:
