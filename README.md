@@ -195,6 +195,27 @@ that Compose starts next to the broker (development convenience only, no authent
 4. **Messages** shows what is in the topic, and **Consumers** shows the service's consumer
    group and its lag.
 
+Ready-made events live in [`samples/kafka-ui/`](samples/kafka-ui): open a file, copy its
+single line into the **Value** field. Load their subscriptions first (and keep the webhook
+receiver from step a running):
+
+```bash
+docker exec -i notification-postgres psql -U postgres -d notification_service < samples/kafka-ui/00_subscriptions.sql
+```
+
+| File | What to expect (`curl -H 'X-Client-Id: <client>' http://localhost:8080/notification_events/<event_id>`) |
+|---|---|
+| `01_credit_card_payment.json` | `UI-001` → `COMPLETED`, one `SUCCESS` attempt; the receiver prints the payload. Publish it twice: the repeat is ignored |
+| `02_with_version_and_correlation_id.json` | `UI-002` → `COMPLETED`, stored with version 2 and the correlation id `corr-ui-002` |
+| `03_structured_content.json` | `UI-003` → `COMPLETED`; `content` holds JSON, so the payload is stored as that document instead of being wrapped in `{"content": ...}` |
+| `04_webhook_unreachable.json` | `UI-004` (client `CLIENT-UI-B`) → `RETRY_SCHEDULED` with exponential backoff, then `FAILED` after 5 attempts; then try `POST .../UI-004/replay` |
+| `05_no_subscription.json` | `UI-005` → stored `FAILED` with no owner, so it is **not** visible through the API (check the `notification_event` table) |
+| `06_invalid_unknown_event_type.json` | Poison message: the service logs `event rejected` and acknowledges it; nothing is stored |
+| `07_invalid_missing_client_id.json` | Same: rejected and acknowledged, nothing stored |
+
+The client ids are `CLIENT-UI-A` (events 01–03), `CLIENT-UI-B` (04) and `CLIENT-UI-C` (05).
+To publish an event again, change its `event_id`.
+
 The UI reaches the broker over the Compose network (`kafka:19092`); the service and any
 host tool keep using `localhost:9092`. If port 8081 is taken, change the host side of the
 `kafka-ui` port mapping in `docker-compose.yml`.

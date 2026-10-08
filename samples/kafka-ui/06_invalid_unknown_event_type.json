@@ -1,0 +1,1 @@
+{"event_id":"UI-006","event_type":"not_a_real_type","content":"Rejected: event_type is not in the EventType enum","client_id":"CLIENT-UI-A"}

@@ -1,0 +1,1 @@
+{"event_id":"UI-003","event_type":"credit_refund","content":"{\"order\":\"789\",\"amount\":45.99,\"currency\":\"USD\"}","client_id":"CLIENT-UI-A"}
