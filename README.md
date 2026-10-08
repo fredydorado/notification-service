@@ -77,11 +77,12 @@ with Compose v2 — no PostgreSQL or Kafka has to be installed on the machine.
 
 | Service | Image | Host port | Connection |
 |---|---|---|---|
-| Kafka | `apache/kafka:latest` — default single-node KRaft configuration | `9092` | `localhost:9092`, plaintext |
+| Kafka | `apache/kafka:latest` — single-node KRaft | `9092` | `localhost:9092`, plaintext (`kafka:19092` from other containers) |
+| Kafka UI | `kafbat/kafka-ui:latest` | **`8081`** | <http://localhost:8081> — browse topics and [publish test events](#publish-with-kafka-ui) |
 | PostgreSQL | `postgres:17` | **`5433`** (container port 5432) | database `notification_service`, user `postgres`, password `postgres` |
 
 PostgreSQL is published on **5433**, not 5432, so it does not collide with a PostgreSQL
-already installed on the host.
+already installed on the host. Kafka UI is on **8081** because 8080 is the service itself.
 
 ### 1. Start Kafka and PostgreSQL
 
@@ -171,6 +172,32 @@ array, so publish them one at a time). In Git Bash on Windows, prefix the comman
 ```bash
 echo '{"event_id":"EVT001","event_type":"credit_card_payment","content":"Credit card payment received for $150.00","client_id":"CLIENT001"}' | docker exec -i notification-kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic notification-events
 ```
+
+##### Publish with Kafka UI
+
+Instead of `docker exec`, you can publish from the browser with the Kafka UI container
+that Compose starts next to the broker (development convenience only, no authentication):
+
+1. Open <http://localhost:8081>. The cluster `local` should show as online.
+2. **Topics → `notification-events`**. The topic appears after the service or a producer
+   has touched it for the first time; if it is missing, start the service or publish one
+   event with the command above, or create it with **Add a Topic** (1 partition).
+3. **Produce Message** (top right). Leave **Key** empty, set **Value Serde** to `String`
+   and paste one event as the **Value**:
+
+   ```json
+   {"event_id":"EVT002","event_type":"credit_card_payment","content":"Credit card payment received for $150.00","client_id":"CLIENT001"}
+   ```
+
+   Use a new `event_id` each time: the pipeline is idempotent per `event_id`, so a repeat
+   is ignored. Unlike the console producer, the UI takes the document as it is, so it
+   works for the single events inside the `events` array of the sample file too.
+4. **Messages** shows what is in the topic, and **Consumers** shows the service's consumer
+   group and its lag.
+
+The UI reaches the broker over the Compose network (`kafka:19092`); the service and any
+host tool keep using `localhost:9092`. If port 8081 is taken, change the host side of the
+`kafka-ui` port mapping in `docker-compose.yml`.
 
 **d. Follow it through the API:**
 
