@@ -206,6 +206,77 @@ to delete it and start from an empty schema next time. Kafka data is not persist
 
 ---
 
+## Testing the REST API with Postman
+
+[`postman/`](postman) holds a Postman collection that exercises the three endpoints of
+the [locally deployed](#run-locally) service, mirroring the scenarios of
+`NotificationEventControllerIntTest`:
+
+| File | Purpose |
+|---|---|
+| [`notification-service.postman_collection.json`](postman/notification-service.postman_collection.json) | 30 requests with test scripts, in folders: Health, List, Detail, Replay, Errors, Correlation id, OpenAPI |
+| [`seed.sql`](postman/seed.sql) | The data those requests expect: two clients (`CLIENT-API-A`, `CLIENT-API-B`) and events in every status needed |
+
+The integration test seeds its data through the repositories; Postman can only make HTTP
+calls, so the same data is loaded with a SQL script instead.
+
+### Setup
+
+1. Start the infrastructure: `docker compose up -d --wait`.
+2. Start the service **with the dispatcher disabled**, so a replayed event stays `PENDING`
+   long enough to be asserted instead of being claimed and delivered straight away (this is
+   what the integration test does too):
+
+   ```bash
+   mvn spring-boot:run -Dspring-boot.run.profiles=local -Dspring-boot.run.arguments=--notification.processing.dispatch-enabled=false
+   ```
+
+   (PowerShell: quote each `-D` argument, as in [Run locally](#2-start-the-service-with-the-local-profile).)
+3. Load the test data — this is also how you reset it:
+
+   ```bash
+   docker exec -i notification-postgres psql -U postgres -d notification_service < postman/seed.sql
+   ```
+
+4. In Postman, **Import** the collection file. Its collection variables default to
+   `baseUrl = http://localhost:8080`, `clientA = CLIENT-API-A` and `clientB = CLIENT-API-B`;
+   change `baseUrl` if the service listens elsewhere.
+5. Run it: right-click the collection → **Run collection** (the folders are ordered, and
+   every request carries its own assertions), or send requests one by one.
+
+Command-line equivalent, with [newman](https://github.com/postmanlabs/newman):
+
+```bash
+newman run postman/notification-service.postman_collection.json
+```
+
+### What is covered
+
+| Folder | Scenarios |
+|---|---|
+| Health | `/actuator/health` is `UP` including the database |
+| List | only the caller's events; pagination metadata; attempt count + last HTTP status; `delivery_status` filter; `from` / `to` creation-date range |
+| Detail | event with attempt history (attempts `1, 2`, HTTP `500, 503`, webhook URL); another client's event is `404`; unknown event is `404` |
+| Replay | `FAILED` event accepted (`202`) and re-queued as `PENDING`; `COMPLETED` event rejected (`409`, `NOTIFICATION_EVENT_NOT_REPLAYABLE`) and untouched; another client's event is `404` and stays `FAILED`; replay twice: first `202`, second `409`, and no delivery attempts are fabricated |
+| Errors | missing `X-Client-Id` → `401`; negative page, zero size, unknown `delivery_status`, malformed date → `VALIDATION_ERROR`; size above the maximum and an inverted date range → `INVALID_REQUEST`; error body is well formed and leaks no class names, SQL or stack traces |
+| Correlation id | a supplied `X-Correlation-Id` is echoed; one is generated otherwise |
+| OpenAPI | `/v3/api-docs` documents all three endpoints, the error schema and the `202`/`404`/`409` responses |
+
+Two things differ from the integration test:
+
+- **Concurrent replays.** Postman cannot send two requests at the same instant, so the
+  test that proves a race produces exactly one winner is replaced by a sequential
+  double replay (`202`, then `409`). The race itself stays covered by
+  `shouldAcceptOnlyOneOfTwoConcurrentReplays`.
+- **Database assertions.** The integration test reads the row back with JDBC; the collection
+  reads it back through `GET /notification_events/{id}` instead.
+
+The **Replay** folder consumes the seeded `FAILED` events (`FAILED → PENDING`), so run
+`postman/seed.sql` again before every full run. Without the dispatcher disabled, the
+"re-queued (PENDING)" check can fail, because the event may already have been picked up.
+
+---
+
 ## Running the tests
 
 The suite is **123 tests**: unit tests plus integration tests that run against a real
@@ -569,6 +640,7 @@ All three carry a `version` column for optimistic locking.
 
 ```
 docker-compose.yml  Kafka + PostgreSQL for running the service locally
+postman/         Postman collection + seed.sql for testing the REST API against it
 scripts/         run-tests.ps1 / run-tests.sh - Maven with a reachable Docker daemon
 src/main/java/com/fardorado/notification/
   domain/        model + state machine; no Spring, JPA, Kafka or Jackson

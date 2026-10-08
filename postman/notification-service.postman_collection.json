@@ -1,0 +1,1209 @@
+{
+  "info": {
+    "_postman_id": "95e2101c-596f-546e-a02d-43442773008b",
+    "name": "notification-service - notification events API",
+    "description": "Black-box tests of the notification-events REST API, mirroring the scenarios of NotificationEventControllerIntTest.\n\nSetup (see the README section 'Postman collection'):\n1. Start the service with the dispatcher disabled (--notification.processing.dispatch-enabled=false), so replayed events stay PENDING.\n2. Load postman/seed.sql into the database. The Replay folder consumes the seeded FAILED events, so re-run the seed before every run.\n3. Run the collection (folders in order) with the Collection Runner or newman.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "clientA",
+      "value": "CLIENT-API-A"
+    },
+    {
+      "key": "clientB",
+      "value": "CLIENT-API-B"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Actuator health is UP (database reachable)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('overall status UP', () => pm.expect(body.status).to.eql('UP'));",
+                  "pm.test('db is UP', () => pm.expect(body.components.db.status).to.eql('UP'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/actuator/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "actuator",
+                "health"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "List",
+      "item": [
+        {
+          "name": "Lists only the calling client's events",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const ids = body.items.map(i => i.id);",
+                  "pm.test('contains the calling client\\'s event', () => pm.expect(ids).to.include('API-L1'));",
+                  "pm.test('does not contain another client\\'s event', () => pm.expect(ids).to.not.include('API-L2'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?size=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "size",
+                  "value": "100"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Returns pagination metadata",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('page is 0', () => pm.expect(body.page).to.eql(0));",
+                  "pm.test('size is 1', () => pm.expect(body.size).to.eql(1));",
+                  "pm.test('one item on the page', () => pm.expect(body.items).to.have.lengthOf(1));",
+                  "pm.test('totalElements is positive', () => pm.expect(body.totalElements).to.be.above(0));",
+                  "pm.test('totalPages = totalElements for size 1', () => pm.expect(body.totalPages).to.eql(body.totalElements));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?page=0&size=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Exposes attempt count and last HTTP status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const summary = pm.response.json().items.find(i => i.id === 'API-L3');",
+                  "pm.test('API-L3 is listed', () => pm.expect(summary).to.be.an('object'));",
+                  "pm.test('attemptCount is 2', () => pm.expect(summary.attemptCount).to.eql(2));",
+                  "pm.test('lastHttpStatus is 503', () => pm.expect(summary.lastHttpStatus).to.eql(503));",
+                  "pm.test('eventType is CREDIT_CARD_PAYMENT', () => pm.expect(summary.eventType).to.eql('CREDIT_CARD_PAYMENT'));",
+                  "pm.test('status is FAILED', () => pm.expect(summary.status).to.eql('FAILED'));",
+                  "pm.test('createdAt is present', () => pm.expect(summary.createdAt).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?size=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "size",
+                  "value": "100"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Filters by delivery status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const ids = pm.response.json().items.map(i => i.id);",
+                  "pm.test('contains the FAILED event', () => pm.expect(ids).to.include('API-F-FAILED'));",
+                  "pm.test('does not contain the PENDING event', () => pm.expect(ids).to.not.include('API-F-PENDING'));",
+                  "pm.test('every item is FAILED', () => pm.response.json().items.forEach(i => pm.expect(i.status).to.eql('FAILED')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?delivery_status=FAILED&size=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "delivery_status",
+                  "value": "FAILED"
+                },
+                {
+                  "key": "size",
+                  "value": "100"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Filters by creation date: from in the past includes the event",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('API-D1 is in range', () => pm.expect(pm.response.json().items.map(i => i.id)).to.include('API-D1'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?from=2000-01-01T00:00:00Z&size=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2000-01-01T00:00:00Z"
+                },
+                {
+                  "key": "size",
+                  "value": "100"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Filters by creation date: to in the past excludes the event",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('API-D1 is out of range', () => pm.expect(pm.response.json().items.map(i => i.id)).to.not.include('API-D1'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?to=2000-01-01T00:00:00Z&size=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "to",
+                  "value": "2000-01-01T00:00:00Z"
+                },
+                {
+                  "key": "size",
+                  "value": "100"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "description": "Equivalent to the list scenarios of NotificationEventControllerIntTest."
+    },
+    {
+      "name": "Detail",
+      "item": [
+        {
+          "name": "Returns event details with attempt history",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('id', () => pm.expect(body.id).to.eql('API-D-OK'));",
+                  "pm.test('status is FAILED', () => pm.expect(body.status).to.eql('FAILED'));",
+                  "pm.test('attemptCount is 2', () => pm.expect(body.attemptCount).to.eql(2));",
+                  "pm.test('lastHttpStatus is 503', () => pm.expect(body.lastHttpStatus).to.eql(503));",
+                  "pm.test('webhookUrl is the subscription\\'s', () =>",
+                  "    pm.expect(body.webhookUrl).to.eql('https://example.com/' + pm.collectionVariables.get('clientA')));",
+                  "pm.test('attempt numbers are 1, 2', () => pm.expect(body.attempts.map(a => a.attempt)).to.eql([1, 2]));",
+                  "pm.test('attempt HTTP statuses are 500, 503', () => pm.expect(body.attempts.map(a => a.httpStatus)).to.eql([500, 503]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events/API-D-OK",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events",
+                "API-D-OK"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Does not reveal another client's event",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "const err = pm.response.json();",
+                  "pm.test('error code is RESOURCE_NOT_FOUND', () => pm.expect(err.code).to.eql('RESOURCE_NOT_FOUND'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events/API-D-THEIRS",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events",
+                "API-D-THEIRS"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Unknown event is 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "const err = pm.response.json();",
+                  "pm.test('error code is RESOURCE_NOT_FOUND', () => pm.expect(err.code).to.eql('RESOURCE_NOT_FOUND'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events/API-DOES-NOT-EXIST",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events",
+                "API-DOES-NOT-EXIST"
+              ]
+            }
+          }
+        }
+      ],
+      "description": "Another client's event is reported as 404, never 403, so its existence is not revealed."
+    },
+    {
+      "name": "Replay",
+      "item": [
+        {
+          "name": "Accepts replay of a FAILED event",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test('echoes the event id', () => pm.expect(body.notificationEventId).to.eql('API-R-FAILED'));",
+                  "pm.test('status is PENDING', () => pm.expect(body.status).to.eql('PENDING'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events/API-R-FAILED/replay",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events",
+                "API-R-FAILED",
+                "replay"
+              ]
+            }
+          }
+        },
+        {
+          "name": "... and the event is re-queued (PENDING)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status is PENDING', () => pm.expect(pm.response.json().status).to.eql('PENDING'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events/API-R-FAILED",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events",
+                "API-R-FAILED"
+              ]
+            },
+            "description": "Needs the dispatcher disabled, otherwise it may already have claimed the event."
+          }
+        },
+        {
+          "name": "Rejects replay of a COMPLETED event",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "const err = pm.response.json();",
+                  "pm.test('error code is NOTIFICATION_EVENT_NOT_REPLAYABLE', () => pm.expect(err.code).to.eql('NOTIFICATION_EVENT_NOT_REPLAYABLE'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events/API-R-COMPLETED/replay",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events",
+                "API-R-COMPLETED",
+                "replay"
+              ]
+            }
+          }
+        },
+        {
+          "name": "... and the COMPLETED event is untouched",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status is still COMPLETED', () => pm.expect(pm.response.json().status).to.eql('COMPLETED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events/API-R-COMPLETED",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events",
+                "API-R-COMPLETED"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cannot replay another client's event",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "const err = pm.response.json();",
+                  "pm.test('error code is RESOURCE_NOT_FOUND', () => pm.expect(err.code).to.eql('RESOURCE_NOT_FOUND'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events/API-R-THEIRS/replay",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events",
+                "API-R-THEIRS",
+                "replay"
+              ]
+            }
+          }
+        },
+        {
+          "name": "... and the other client's event is still FAILED (owner's view)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status is still FAILED', () => pm.expect(pm.response.json().status).to.eql('FAILED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientB}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events/API-R-THEIRS",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events",
+                "API-R-THEIRS"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Second replay of the same event: first one wins",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "pm.test('status is PENDING', () => pm.expect(pm.response.json().status).to.eql('PENDING'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events/API-R-TWICE/replay",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events",
+                "API-R-TWICE",
+                "replay"
+              ]
+            },
+            "description": "Sequential stand-in for the IntTest's concurrent-replay scenario (Postman cannot fire simultaneous requests): one replay is accepted, the next is a conflict."
+          }
+        },
+        {
+          "name": "... the repeat is rejected with 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('error code is a conflict', () =>",
+                  "    pm.expect(['NOTIFICATION_EVENT_NOT_REPLAYABLE', 'RESOURCE_CONFLICT']).to.include(pm.response.json().code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events/API-R-TWICE/replay",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events",
+                "API-R-TWICE",
+                "replay"
+              ]
+            }
+          }
+        },
+        {
+          "name": "... and replay fabricated no attempts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('queued exactly once (PENDING)', () => pm.expect(body.status).to.eql('PENDING'));",
+                  "pm.test('no delivery attempts were created by the replay', () => pm.expect(body.attemptCount).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events/API-R-TWICE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events",
+                "API-R-TWICE"
+              ]
+            }
+          }
+        }
+      ],
+      "description": "Replay consumes the seeded FAILED events: re-run postman/seed.sql before running this folder again."
+    },
+    {
+      "name": "Errors",
+      "item": [
+        {
+          "name": "Missing X-Client-Id is 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 401', () => pm.response.to.have.status(401));",
+                  "const err = pm.response.json();",
+                  "pm.test('error code is UNAUTHORIZED', () => pm.expect(err.code).to.eql('UNAUTHORIZED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Negative page is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "const err = pm.response.json();",
+                  "pm.test('error code is VALIDATION_ERROR', () => pm.expect(err.code).to.eql('VALIDATION_ERROR'));",
+                  "pm.test('names the page field', () => pm.expect(err.errors.map(e => e.field)).to.include('page'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?page=-1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "-1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Zero size is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "const err = pm.response.json();",
+                  "pm.test('error code is VALIDATION_ERROR', () => pm.expect(err.code).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?size=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "size",
+                  "value": "0"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Size above the configured maximum is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "const err = pm.response.json();",
+                  "pm.test('error code is INVALID_REQUEST', () => pm.expect(err.code).to.eql('INVALID_REQUEST'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?size=101",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "size",
+                  "value": "101"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Inverted date range is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "const err = pm.response.json();",
+                  "pm.test('error code is INVALID_REQUEST', () => pm.expect(err.code).to.eql('INVALID_REQUEST'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?from=2026-10-05T00:00:00Z&to=2026-10-01T00:00:00Z",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-10-05T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-10-01T00:00:00Z"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Unknown delivery status is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "const err = pm.response.json();",
+                  "pm.test('error code is VALIDATION_ERROR', () => pm.expect(err.code).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?delivery_status=NOPE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "delivery_status",
+                  "value": "NOPE"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Malformed date is rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "const err = pm.response.json();",
+                  "pm.test('error code is VALIDATION_ERROR', () => pm.expect(err.code).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events?from=not-a-date",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "not-a-date"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Error body is well formed and leaks no internals",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "const text = pm.response.text();",
+                  "['\"code\":\"RESOURCE_NOT_FOUND\"', '\"path\":', '\"datetime\":', '\"correlationId\":']",
+                  "    .forEach(s => pm.test('contains ' + s, () => pm.expect(text).to.include(s)));",
+                  "['com.fardorado', 'Exception', 'at org.springframework', 'select ', 'NotificationEventEntity']",
+                  "    .forEach(s => pm.test('does not leak ' + s, () => pm.expect(text).to.not.include(s)));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events/API-DOES-NOT-EXIST",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events",
+                "API-DOES-NOT-EXIST"
+              ]
+            }
+          }
+        }
+      ],
+      "description": "Every failure uses the same ErrorResponseDto body."
+    },
+    {
+      "name": "Correlation id",
+      "item": [
+        {
+          "name": "Echoes a supplied X-Correlation-Id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('header is echoed', () => pm.expect(pm.response.headers.get('X-Correlation-Id')).to.eql('corr-api-1'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "corr-api-1"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Generates one when none is supplied",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('header is generated', () => pm.expect(pm.response.headers.get('X-Correlation-Id')).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Client-Id",
+                "value": "{{clientA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification_events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification_events"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "OpenAPI",
+      "item": [
+        {
+          "name": "Documents every endpoint",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const doc = pm.response.text();",
+                  "['\"/notification_events\"', '\"/notification_events/{notification_event_id}\"',",
+                  " '\"/notification_events/{notification_event_id}/replay\"',",
+                  " 'List notification events', 'Get notification event details', 'Replay a failed notification event',",
+                  " 'ErrorResponseDto', '\"202\"', '\"404\"', '\"409\"']",
+                  "    .forEach(s => pm.test('documents ' + s, () => pm.expect(doc).to.include(s)));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v3/api-docs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v3",
+                "api-docs"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
